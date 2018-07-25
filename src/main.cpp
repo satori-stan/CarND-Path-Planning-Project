@@ -119,7 +119,8 @@ int main() {
 
             // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 
-            PolynomialTrajectoryGenerator::StraightLine(car_x, car_y, car_yaw,
+            PolynomialTrajectoryGenerator::FollowLane(car_x, car_y, car_yaw,
+                map_waypoints_x, map_waypoints_y, map_waypoints_s,
                 next_x_vals, next_y_vals);
 
             // END
