@@ -67,12 +67,14 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
+  PolynomialTrajectoryGenerator ptg;
+
   /*
   h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s,
       &map_waypoints_dx, &map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws,
       char *data, size_t length, uWS::OpCode opCode) {
   */
-  h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s,
+  h.onMessage([&ptg, &map_waypoints_x, &map_waypoints_y, &map_waypoints_s,
       &map_waypoints_dx, &map_waypoints_dy](uWS::WebSocket<uWS::SERVER>* ws,
       char *data, size_t length, uWS::OpCode opCode) {
 
@@ -119,8 +121,10 @@ int main() {
 
             // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 
-            PolynomialTrajectoryGenerator::FollowLane(car_x, car_y, car_yaw,
+            ptg.FollowLane(
                 map_waypoints_x, map_waypoints_y, map_waypoints_s,
+                previous_path_x, previous_path_y,
+                car_x, car_y, car_yaw,
                 next_x_vals, next_y_vals);
 
             // END
