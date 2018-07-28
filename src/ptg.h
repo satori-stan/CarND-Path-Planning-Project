@@ -3,7 +3,11 @@
 
 #include <vector>
 
+#include "json.hpp"
+
 #include "helpers.h"
+
+using json = nlohmann::json;
 
 class PolynomialTrajectoryGenerator {
 
@@ -27,7 +31,17 @@ class PolynomialTrajectoryGenerator {
       std::vector<double>& new_x,
       std::vector<double>& new_y);
 
+  void FollowLaneAndLeadingCar(
+      const std::vector<double>& maps_x,
+      const std::vector<double>& maps_y,
+      const std::vector<double>& maps_s,
+      const json::value_type sensor_data,
+      std::vector<double>& new_x,
+      std::vector<double>& new_y);
+
   // Data members
+  // In mph
+  double target_speed_;
   //std::vector<double> path_x_;
   //std::vector<double> path_y_;
 };

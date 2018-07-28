@@ -95,6 +95,7 @@ int main() {
         if (event == "telemetry") {
           // j[1] is the data JSON object
           
+          /*
           // Main car's localization Data
             double car_x = j[1]["x"];
             double car_y = j[1]["y"];
@@ -112,6 +113,7 @@ int main() {
 
             // Sensor Fusion Data, a list of all other cars on the same side of the road.
             auto sensor_fusion = j[1]["sensor_fusion"];
+          */
 
             json msgJson;
 
@@ -121,10 +123,13 @@ int main() {
 
             // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 
-            ptg.FollowLane(
+            ptg.FollowLaneAndLeadingCar(
                 map_waypoints_x, map_waypoints_y, map_waypoints_s,
+                j[1],
+                /*
                 previous_path_x, previous_path_y,
                 car_x, car_y, car_yaw,
+                */
                 next_x_vals, next_y_vals);
 
             // END
