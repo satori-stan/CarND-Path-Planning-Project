@@ -33,11 +33,20 @@ void PolynomialTrajectoryGenerator::FollowLane(
   std::vector<double> frenet = Helpers::getFrenet(current_x, current_y,
                                                   current_yaw, maps_x, maps_y);
   double current_s = frenet[0];
-  double current_d = 6;  // Should use frenet[1], but the sparsity of the map
-                         // data can cause the value to vary.
+  // Should use frenet[1], but the sparsity of the map data can cause the value
+  // to vary. Instead we express the value of d in terms of the lane we are
+  // keeping.
+  double lane_width = 4;  // In m
+  int current_lane = 2;
+  double current_d = (current_lane - 0.5) * lane_width;
 
   // 50 points into the future, but only move in s coordinate
-  double distance_increment = 0.4; // 0.5 is too fast!
+  size_t path_points = 50;
+  double target_speed = 49.5;  // In mph
+  // mph * km_per_mile * meters_per_km / seconds_per_hour
+  double target_velocity = target_speed * 1.609344 * 1000 / 3600;  // In m/s
+  double controller_execution_time = 0.02;  // In s
+  double distance_increment = controller_execution_time * target_velocity;  // path_points;
 
   // We build a path buffer to make sure the trajectory is always smooth
   std::vector<double> x;
