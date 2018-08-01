@@ -4,9 +4,14 @@
 
 #include "spline.h"
 
-PolynomialTrajectoryGenerator::PolynomialTrajectoryGenerator() :
-    // TODO: Set starting speed to zero once a speedup policy has been set-up
-    target_speed_(49.5) {}
+PolynomialTrajectoryGenerator::PolynomialTrajectoryGenerator(
+    double max_speed,
+    double max_acceleration,
+    double max_jerk) :
+  max_speed_(max_speed),
+  max_acceleration_(max_acceleration),
+  max_jerk_(max_jerk),
+  target_speed_(0) {}
 
 PolynomialTrajectoryGenerator::~PolynomialTrajectoryGenerator() {}
 
@@ -146,6 +151,7 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   double lane_end = lane_width * current_lane;
 
   // Make sure we slow down if there is a car in our path
+  bool too_close_to_leading_car = false;
   for (size_t i = 0; i < sensor_fusion.size(); ++i) {
     /*
       Map of adversary cars in sensor fusion array
@@ -168,40 +174,50 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
       // TODO: Make vehicle safety distance into a variable
       if (adversary_s < end_path_s && (end_path_s-adversary_s) < 30) {
         // We are too close!
-        // TODO: Make increments and decrements proportional to the acceleration
-        //       limits.
-        // TODO: Make the car speed up if the way ahead is clear (up to the
-        //       speed limit).
-        target_speed_ *= 0.99;
-        std::cout << target_speed_ << std::endl;
+        too_close_to_leading_car = true;
+        break;  // No need to check all the rest of the cars
       }
     }
   }
 
-  // 50 points into the future, but only move in s coordinate
-  size_t path_points = 50;
+  // TODO: Make increments and decrements proportional to the acceleration limits.
+  if (too_close_to_leading_car) {
+    target_speed_ -= 0.2;
+  } else if (target_speed_ < max_speed_) {
+    target_speed_ += 0.2;
+  }
+
   // mph * km_per_mile * meters_per_km / seconds_per_hour
   double target_velocity = target_speed_ * 1.609344 * 1000 / 3600;  // In m/s
   double controller_execution_time = 0.02;  // In s
   double distance_increment = controller_execution_time * target_velocity;  // path_points;
+  // 50 points into the future, but only move in s coordinate
+  size_t path_points = min(100ULL,
+      static_cast<unsigned long long>((20 / distance_increment) + 0.5));
 
   // We build a path buffer to make sure the trajectory is always smooth
   std::vector<double> x;
   std::vector<double> y;
   size_t previous_path_size = previous_path_x.size();
   double first_x;
+  // TODO: Rotate/translate coordinates to simplify calculations when movement
+  //       is mostly in y coordinate.
+  reference_x_ = car_x;
+  reference_y_ = car_y;
+  reference_angle_ = Helpers::deg2rad(car_yaw);
+
   // TODO: Use more points from the previous path to account for lag between
   //       path calculation and actual position upon execution.
   if (previous_path_size < 2) {
     // If we have less than two points left over from our last path calculation,
     // we approximate two points with the current position and 1 unit in the
     // past based on the current yaw.
-    first_x = car_x - cos(Helpers::deg2rad(car_yaw));
+    first_x = reference_x_ - cos(reference_angle_);
     x.push_back(first_x);
-    y.push_back(car_y - sin(Helpers::deg2rad(car_yaw)));
+    y.push_back(reference_y_ - sin(reference_angle_));
 
-    x.push_back(car_x);
-    y.push_back(car_y);
+    x.push_back(reference_x_);
+    y.push_back(reference_y_);
   } else {
     // If we have more than two points left over from our last path calculation,
     // grab the first two.
@@ -211,6 +227,20 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
 
     x.push_back(previous_path_x[1]);
     y.push_back(previous_path_y[1]);
+    /*
+    double prev_reference_x = previous_path_x[previous_path_size - 2];
+    double prev_reference_y = previous_path_y[previous_path_size - 2];
+    x.push_back(prev_reference_x);
+    y.push_back(prev_reference_y);
+
+    reference_x_ = previous_path_x[previous_path_size - 1];
+    reference_y_ = previous_path_y[previous_path_size - 1];
+    x.push_back(reference_x_);
+    y.push_back(reference_y_);
+
+    // Minute 26 of guide?? They go for the end of the path!
+    reference_angle_ = atan2(reference_y_ - prev_reference_y, reference_x_ - prev_reference_x);
+    */
   }
 
   // Choose (two?) points ahead to draw a line. Thinking of a similar distance
@@ -224,20 +254,97 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   x.push_back(cartesian[0]);
   y.push_back(cartesian[1]);
 
-  double last_x = cartesian[0];
+  /*
+  std::cout << "##" << std::endl;
+  for (size_t i = 0; i < x.size(); ++i) {
+    std::cout << x[i] << "," << y[i] << std::endl;
+  }
+  */
+  // Now shift points to use the car's reference frame
+  CartesianShift(x, y);
+  /*
+  std::cout << "--" << std::endl;
+  for (size_t i = 0; i < x.size(); ++i) {
+    std::cout << x[i] << "," << y[i] << std::endl;
+  }
+  */
 
   // Now we use a spline (from http://kluge.in-chemnitz.de/opensource/spline/)
   // to plot a smooth trajectory that touches all our points.
   tk::spline s;
   s.set_points(x, y);  // Set must be sorted by x ascending!!
-  // new_y = s(new_x);
 
-  //double distance_increment = (last_x - first_x) / 50;
+  double last_x = 0.0;
 
-  for (size_t i = 1; i <= 50; ++i) {
-    double delta = distance_increment * i;
-    double x = car_x + delta;
-    next_x.push_back(x);
-    next_y.push_back(s(x));
+  // First we use up all points left over from previous path definition
+  /*
+  for (size_t i = 0; i < previous_path_size; ++i) {
+    next_x.push_back(previous_path_x[i]);
+    next_y.push_back(previous_path_y[i]);
   }
+  */
+
+  // Then we create new points from the spline
+  //for (size_t i = 1; i <= 50-previous_path_size; ++i) {
+  for (size_t i = 1; i <= path_points; ++i) {
+    /*
+    double delta = distance_increment * i;
+    std::vector<double> calculated = CartesianUnshift(delta, s(delta));
+    next_x.push_back(calculated[0]);
+    next_y.push_back(calculated[1]);
+    */
+    double delta = distance_increment * i;
+    next_x.push_back(delta);
+    next_y.push_back(s(delta));
+  }
+  CartesianUnshift(next_x, next_y);
+  /*
+  std::cout << "--" << std::endl;
+  for (size_t i = 0; i < next_x.size(); ++i) {
+    std::cout << next_x[i] << "," << next_y[i] << std::endl;
+  }
+  */
+  
+}
+
+void PolynomialTrajectoryGenerator::CartesianShift(std::vector<double>& x,
+                                                   std::vector<double>& y) {
+  for (size_t i = 0; i < x.size(); ++i) {
+    double shifted_x = x[i] - reference_x_;
+    double shifted_y = y[i] - reference_y_;
+
+    x[i] = shifted_x * cos(-reference_angle_)
+        - shifted_y * sin(-reference_angle_);
+
+    y[i] = shifted_x * sin(-reference_angle_)
+        + shifted_y * cos(-reference_angle_);
+  }
+}
+
+void PolynomialTrajectoryGenerator::CartesianUnshift(std::vector<double>& x,
+                                                   std::vector<double>& y) {
+  for (size_t i = 0; i < x.size(); ++i) {
+    double rotated_x = x[i] * cos(reference_angle_)
+        - y[i] * sin(reference_angle_);
+    double rotated_y = x[i] * sin(reference_angle_)
+        + y[i] * cos(reference_angle_);
+
+    x[i] = rotated_x + reference_x_;
+
+    y[i] = rotated_y + reference_y_;
+  }
+}
+
+std::vector<double> PolynomialTrajectoryGenerator::CartesianUnshift(double x,
+                                                                    double y) {
+  double rotated_x = x * cos(reference_angle_)
+      - y * sin(reference_angle_);
+  double rotated_y = x * sin(reference_angle_)
+      + y * cos(reference_angle_);
+
+  std::vector<double> coordinates;
+  coordinates.push_back(rotated_x + reference_x_);
+
+  coordinates.push_back(rotated_y + reference_y_);
+  return coordinates;
 }

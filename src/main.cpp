@@ -67,7 +67,7 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
-  PolynomialTrajectoryGenerator ptg;
+  PolynomialTrajectoryGenerator ptg(49.5, 10, 10);
 
   /*
   h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s,

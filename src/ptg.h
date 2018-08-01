@@ -12,7 +12,8 @@ using json = nlohmann::json;
 class PolynomialTrajectoryGenerator {
 
  public:
-  PolynomialTrajectoryGenerator();
+  PolynomialTrajectoryGenerator(double max_speed, double max_acceleration,
+        double max_jerk);
   virtual ~PolynomialTrajectoryGenerator();
 
   static void StraightLine(
@@ -39,11 +40,24 @@ class PolynomialTrajectoryGenerator {
       std::vector<double>& new_x,
       std::vector<double>& new_y);
 
+ private:
+  
+  void CartesianShift(std::vector<double>& x, std::vector<double>& y);
+  void CartesianUnshift(std::vector<double>& x, std::vector<double>& y);
+  std::vector<double> CartesianUnshift(double x, double y);
+
   // Data members
   // In mph
+  double max_speed_;
+  // In m/s^2
+  double max_acceleration_;
+  // In m/s^3
+  double max_jerk_;
+  // In mph
   double target_speed_;
-  //std::vector<double> path_x_;
-  //std::vector<double> path_y_;
+  double reference_x_;
+  double reference_y_;
+  double reference_angle_;
 };
 
 #endif  // PTG_H_
