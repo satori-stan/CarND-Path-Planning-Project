@@ -191,23 +191,24 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   double target_velocity = target_speed_ * 1.609344 * 1000 / 3600;  // In m/s
   double controller_execution_time = 0.02;  // In s
   double distance_increment = controller_execution_time * target_velocity;  // path_points;
-  // 50 points into the future, but only move in s coordinate
-  size_t path_points = min(100ULL,
-      static_cast<unsigned long long>((20 / distance_increment) + 0.5));
+  // Figure out a decent number of points that will let us plan 20m into the
+  // future.
+  size_t path_points = min(static_cast<size_t>(100),
+      static_cast<size_t>((20 / distance_increment) + 0.5));
 
   // We build a path buffer to make sure the trajectory is always smooth
   std::vector<double> x;
   std::vector<double> y;
   size_t previous_path_size = previous_path_x.size();
   double first_x;
-  // TODO: Rotate/translate coordinates to simplify calculations when movement
-  //       is mostly in y coordinate.
+  // Rotate/translate coordinates to simplify calculations when movement
+  // is mostly in y coordinate.
   reference_x_ = car_x;
   reference_y_ = car_y;
   reference_angle_ = Helpers::deg2rad(car_yaw);
 
-  // TODO: Use more points from the previous path to account for lag between
-  //       path calculation and actual position upon execution.
+  // Use more points from the previous path to account for lag between
+  // path calculation and actual position upon execution.
   if (previous_path_size < 2) {
     // If we have less than two points left over from our last path calculation,
     // we approximate two points with the current position and 1 unit in the
@@ -219,15 +220,9 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
     x.push_back(reference_x_);
     y.push_back(reference_y_);
   } else {
-    // If we have more than two points left over from our last path calculation,
-    // grab the first two.
-    first_x = previous_path_x[0];
-    x.push_back(previous_path_x[0]);
-    y.push_back(previous_path_y[0]);
+    // Don't use too much of the previous path, to allow room to maneuver.
+    previous_path_size = min(static_cast<size_t>(20), previous_path_size);
 
-    x.push_back(previous_path_x[1]);
-    y.push_back(previous_path_y[1]);
-    /*
     double prev_reference_x = previous_path_x[previous_path_size - 2];
     double prev_reference_y = previous_path_y[previous_path_size - 2];
     x.push_back(prev_reference_x);
@@ -238,9 +233,7 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
     x.push_back(reference_x_);
     y.push_back(reference_y_);
 
-    // Minute 26 of guide?? They go for the end of the path!
     reference_angle_ = atan2(reference_y_ - prev_reference_y, reference_x_ - prev_reference_x);
-    */
   }
 
   // Choose (two?) points ahead to draw a line. Thinking of a similar distance
@@ -254,20 +247,8 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   x.push_back(cartesian[0]);
   y.push_back(cartesian[1]);
 
-  /*
-  std::cout << "##" << std::endl;
-  for (size_t i = 0; i < x.size(); ++i) {
-    std::cout << x[i] << "," << y[i] << std::endl;
-  }
-  */
   // Now shift points to use the car's reference frame
   CartesianShift(x, y);
-  /*
-  std::cout << "--" << std::endl;
-  for (size_t i = 0; i < x.size(); ++i) {
-    std::cout << x[i] << "," << y[i] << std::endl;
-  }
-  */
 
   // Now we use a spline (from http://kluge.in-chemnitz.de/opensource/spline/)
   // to plot a smooth trajectory that touches all our points.
@@ -277,34 +258,20 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   double last_x = 0.0;
 
   // First we use up all points left over from previous path definition
-  /*
   for (size_t i = 0; i < previous_path_size; ++i) {
     next_x.push_back(previous_path_x[i]);
     next_y.push_back(previous_path_y[i]);
   }
-  */
 
   // Then we create new points from the spline
-  //for (size_t i = 1; i <= 50-previous_path_size; ++i) {
-  for (size_t i = 1; i <= path_points; ++i) {
-    /*
+  for (size_t i = 1; i <= path_points-previous_path_size; ++i) {
     double delta = distance_increment * i;
+    // TODO: Improve next line, it seems wasteful.
     std::vector<double> calculated = CartesianUnshift(delta, s(delta));
     next_x.push_back(calculated[0]);
     next_y.push_back(calculated[1]);
-    */
-    double delta = distance_increment * i;
-    next_x.push_back(delta);
-    next_y.push_back(s(delta));
   }
-  CartesianUnshift(next_x, next_y);
-  /*
-  std::cout << "--" << std::endl;
-  for (size_t i = 0; i < next_x.size(); ++i) {
-    std::cout << next_x[i] << "," << next_y[i] << std::endl;
-  }
-  */
-  
+
 }
 
 void PolynomialTrajectoryGenerator::CartesianShift(std::vector<double>& x,
