@@ -11,7 +11,8 @@ PolynomialTrajectoryGenerator::PolynomialTrajectoryGenerator(
   max_speed_(max_speed),
   max_acceleration_(max_acceleration),
   max_jerk_(max_jerk),
-  target_speed_(0) {}
+  target_speed_(0),
+  current_lane_(-1) {}
 
 PolynomialTrajectoryGenerator::~PolynomialTrajectoryGenerator() {}
 
@@ -131,6 +132,8 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   // Previous path data given to the Planner
   auto previous_path_x = sensor_data["previous_path_x"];
   auto previous_path_y = sensor_data["previous_path_y"];
+  size_t previous_path_size = previous_path_x.size();
+
   // Previous path's end s and d values 
   double end_path_s = sensor_data["end_path_s"];
   double end_path_d = sensor_data["end_path_d"];
@@ -145,12 +148,18 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   // to vary. Instead we express the value of d in terms of the lane we are
   // keeping.
   double lane_width = 4;  // In m
-  int current_lane = 2;
-  double lane_start = lane_width * (current_lane - 1);
+
+  int current_lane = static_cast<int>(ceil(car_d / lane_width)); //2;
+  if (current_lane != current_lane_) {
+    current_lane_ = current_lane;
+    std::cout << current_lane << "-> " << car_d << "," << (car_d/ lane_width) << "," << ceil((car_d/ lane_width)) << std::endl;
+  }
   double current_d = (current_lane - 0.5) * lane_width;
-  double lane_end = lane_width * current_lane;
+  double current_lane_start = lane_width * (current_lane - 1);
+  double current_lane_end = lane_width * current_lane;
 
   // Make sure we slow down if there is a car in our path
+  double controller_execution_time = 0.02;  // In s
   bool too_close_to_leading_car = false;
   for (size_t i = 0; i < sensor_fusion.size(); ++i) {
     /*
@@ -168,11 +177,17 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
     double adversary_vy = sensor_fusion[i][4];
     double adversary_s = sensor_fusion[i][5];
     double adversary_d = sensor_fusion[i][6];
-    if (adversary_d > lane_start && adversary_d < lane_end) {
+    if (adversary_d > current_lane_start && adversary_d < current_lane_end) {
       // The other car is in our lane!
       // TODO: Beware, the s value wraps around
       // TODO: Make vehicle safety distance into a variable
-      if (adversary_s < end_path_s && (end_path_s-adversary_s) < 30) {
+      // We figure out where it'll be with respect to us (in the future)
+      double adversary_velocity =
+          sqrt(pow(adversary_vx, 2) + pow(adversary_vy, 2));
+      double future_adversary_s = adversary_s + controller_execution_time *
+          adversary_velocity * previous_path_size;
+      //if (adversary_s > current_s && (adversary_s-current_s) < 30) {
+      if (future_adversary_s > end_path_s && (future_adversary_s-end_path_s) < 30) {
         // We are too close!
         too_close_to_leading_car = true;
         break;  // No need to check all the rest of the cars
@@ -180,16 +195,31 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
     }
   }
 
+  int target_lane = current_lane;
+
   // TODO: Make increments and decrements proportional to the acceleration limits.
   if (too_close_to_leading_car) {
-    target_speed_ -= 0.2;
+    // TODO: Change min and max lane numbers to variables
+    if (current_lane > 1) {
+      target_lane = current_lane - 1;
+    } else if (current_lane < 3) {
+      target_lane = current_lane + 1;
+    } else {
+      target_speed_ -= 0.2;
+    }
   } else if (target_speed_ < max_speed_) {
     target_speed_ += 0.2;
   }
 
+  if (target_lane != current_lane) {
+    std::cout << target_lane << std::endl;
+  }
+  double target_d = (target_lane - 0.5) * lane_width;
+  //double target_lane_start = lane_width * (target_lane - 1);
+  //double target_lane_end = lane_width * target_lane;
+
   // mph * km_per_mile * meters_per_km / seconds_per_hour
   double target_velocity = target_speed_ * 1.609344 * 1000 / 3600;  // In m/s
-  double controller_execution_time = 0.02;  // In s
   double distance_increment = controller_execution_time * target_velocity;  // path_points;
   // Figure out a decent number of points that will let us plan 20m into the
   // future.
@@ -199,7 +229,6 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   // We build a path buffer to make sure the trajectory is always smooth
   std::vector<double> x;
   std::vector<double> y;
-  size_t previous_path_size = previous_path_x.size();
   double first_x;
   // Rotate/translate coordinates to simplify calculations when movement
   // is mostly in y coordinate.
@@ -221,7 +250,7 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
     y.push_back(reference_y_);
   } else {
     // Don't use too much of the previous path, to allow room to maneuver.
-    previous_path_size = min(static_cast<size_t>(20), previous_path_size);
+    //previous_path_size = min(static_cast<size_t>(20), previous_path_size);
 
     double prev_reference_x = previous_path_x[previous_path_size - 2];
     double prev_reference_y = previous_path_y[previous_path_size - 2];
@@ -239,11 +268,11 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
   // Choose (two?) points ahead to draw a line. Thinking of a similar distance
   // increment, distance_increment * 25 and distance_increment * 50.
   std::vector<double> cartesian;
-  cartesian = Helpers::getXY(current_s + 25, current_d, maps_s, maps_x, maps_y);
+  cartesian = Helpers::getXY(current_s + 25, target_d, maps_s, maps_x, maps_y);
   x.push_back(cartesian[0]);
   y.push_back(cartesian[1]);
 
-  cartesian = Helpers::getXY(current_s + 50, current_d, maps_s, maps_x, maps_y);
+  cartesian = Helpers::getXY(current_s + 50, target_d, maps_s, maps_x, maps_y);
   x.push_back(cartesian[0]);
   y.push_back(cartesian[1]);
 

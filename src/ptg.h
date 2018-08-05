@@ -58,6 +58,8 @@ class PolynomialTrajectoryGenerator {
   double reference_x_;
   double reference_y_;
   double reference_angle_;
+
+  int current_lane_;
 };
 
 #endif  // PTG_H_
