@@ -9,11 +9,20 @@
 
 using json = nlohmann::json;
 
+struct Trajectory {
+  std::vector<double> x;
+  std::vector<double> y;
+  double cost;
+};
+
 class PolynomialTrajectoryGenerator {
 
  public:
-  PolynomialTrajectoryGenerator(double max_speed, double max_acceleration,
-        double max_jerk);
+  PolynomialTrajectoryGenerator(const double max_speed, const double max_acceleration,
+      const double max_jerk,
+      const std::vector<double>& maps_x,
+      const std::vector<double>& maps_y,
+      const std::vector<double>& maps_s);
   virtual ~PolynomialTrajectoryGenerator();
 
   static void StraightLine(
@@ -33,12 +42,34 @@ class PolynomialTrajectoryGenerator {
       std::vector<double>& new_y);
 
   void FollowLaneAndLeadingCar(
+      /*
+      const std::vector<double>& maps_x,
+      const std::vector<double>& maps_y,
+      const std::vector<double>& maps_s,
+      */
+      const double car_s,
+      const double lane_start,
+      const double lane_end,
+      const json sensor_fusion,
+      /*
+      std::vector<double>& new_x,
+      std::vector<double>& new_y
+      */
+     Trajectory& out);
+
+  void Generate(
       const std::vector<double>& maps_x,
       const std::vector<double>& maps_y,
       const std::vector<double>& maps_s,
       const json::value_type sensor_data,
       std::vector<double>& new_x,
       std::vector<double>& new_y);
+
+  void AssignBase(const double current_x,
+                  const double current_y,
+                  const double current_theta,
+                  const std::vector<double>& previous_path_x,
+                  const std::vector<double>& previous_path_y);
 
  private:
   
@@ -60,6 +91,13 @@ class PolynomialTrajectoryGenerator {
   double reference_angle_;
 
   int current_lane_;
+
+  std::vector<double> maps_x_;
+  std::vector<double> maps_y_;
+  std::vector<double> maps_s_;
+
+  std::vector<double> x_;
+  std::vector<double> y_;
 };
 
 #endif  // PTG_H_

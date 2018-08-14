@@ -8,7 +8,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
 
-#include "ptg.h"
+#include "path_planner.h"
 
 using namespace std;
 
@@ -67,15 +67,16 @@ int main() {
     map_waypoints_dy.push_back(d_y);
   }
 
-  PolynomialTrajectoryGenerator ptg(49.5, 10, 10);
+  PathPlanner planner(map_waypoints_x, map_waypoints_y,
+      map_waypoints_s, 49.5, 10, 10);
 
   /*
   h.onMessage([&map_waypoints_x, &map_waypoints_y, &map_waypoints_s,
       &map_waypoints_dx, &map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws,
       char *data, size_t length, uWS::OpCode opCode) {
   */
-  h.onMessage([&ptg, &map_waypoints_x, &map_waypoints_y, &map_waypoints_s,
-      &map_waypoints_dx, &map_waypoints_dy](uWS::WebSocket<uWS::SERVER>* ws,
+  h.onMessage([&planner, &map_waypoints_dx, &map_waypoints_dy](
+      uWS::WebSocket<uWS::SERVER>* ws,
       char *data, size_t length, uWS::OpCode opCode) {
 
     // "42" at the start of the message means there's a websocket message event.
@@ -123,8 +124,7 @@ int main() {
 
             // TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 
-            ptg.FollowLaneAndLeadingCar(
-                map_waypoints_x, map_waypoints_y, map_waypoints_s,
+            planner(
                 j[1],
                 /*
                 previous_path_x, previous_path_y,
