@@ -15,6 +15,13 @@ struct Trajectory {
   double cost;
 };
 
+struct SingleAxisTrajectoryBase {
+  double velocity;
+  double acceleration;
+  double jerk;
+  double cost;
+};
+
 class PolynomialTrajectoryGenerator {
 
  public:
@@ -73,6 +80,9 @@ class PolynomialTrajectoryGenerator {
 
  private:
   
+  const double kControllerExecutionTime = 0.02;  // In s  // TODO: Avoid duplication
+  const size_t kPathPoints = 50;
+
   void CartesianShift(std::vector<double>& x, std::vector<double>& y);
   void CartesianUnshift(std::vector<double>& x, std::vector<double>& y);
   std::vector<double> CartesianUnshift(double x, double y);
@@ -80,6 +90,8 @@ class PolynomialTrajectoryGenerator {
   // Data members
   // In mph
   double max_speed_;
+  // In m/s
+  double max_velocity_;
   // In m/s^2
   double max_acceleration_;
   // In m/s^3
@@ -90,7 +102,11 @@ class PolynomialTrajectoryGenerator {
   double reference_y_;
   double reference_angle_;
 
+  double current_velocity_;
+  double current_acceleration_;
+  double current_jerk_;
   int current_lane_;
+  size_t previous_path_size_;
 
   std::vector<double> maps_x_;
   std::vector<double> maps_y_;

@@ -17,6 +17,9 @@ class Helpers {
   static constexpr double pi() { return M_PI; }
   static inline double deg2rad(double x) { return x * pi() / 180; }
   static inline double rad2deg(double x) { return x * 180 / pi(); }
+  template <typename T> static inline int sign (T value) {
+    return (T(0) < value) - (value < T(0));
+  }
 
   static double distance(double x1, double y1, double x2, double y2);
 

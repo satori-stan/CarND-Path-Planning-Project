@@ -17,8 +17,8 @@ PathPlanner::PathPlanner(
     maps_y_(maps_y),
     maps_s_(maps_s),
     max_speed_(max_speed * 0.95),
-    max_acceleration_(max_acceleration),
-    max_jerk_(max_jerk),
+    max_acceleration_(max_acceleration * 0.80),
+    max_jerk_(max_jerk * 0.80),
     target_speed_(0.0),
     current_state_(PlannerStates::kStop),
     current_lane_(99),
@@ -158,12 +158,13 @@ void PathPlanner::PredictAdversariesPositions(
     double adversary_vx = sensor_fusion[i][3];
     double adversary_vy = sensor_fusion[i][4];
     double adversary_s = sensor_fusion[i][5];
+    //double adversary_s = sensor_fusion[i][5] % 6945.554;
     double adversary_d = sensor_fusion[i][6];
     double adversary_velocity =
         sqrt(pow(adversary_vx, 2) + pow(adversary_vy, 2));
     double future_adversary_s = adversary_s + (adversary_velocity *
         seconds_into_the_future);
-    int adversary_lane = 
+    int adversary_lane = CalculateLane(adversary_d);
     // Now update/insert useful values
     sensor_fusion[i][5] = future_adversary_s;
     sensor_fusion[i][7] = adversary_velocity;
