@@ -149,12 +149,13 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
     // Second set is unbound speed (but reach top speed "slowly")
     {max_velocity_, 0.0, current_jerk_ + 0.1, 0.0},
     // Third set is following speed (allow for hard breaking)
-    {max_velocity_, 0.0, max_jerk_, 0.0}};
+    {current_velocity_, 0.0, max_jerk_, 0.0}};
 
   // TODO: Sample paths with target velocities between the max and the current,
   //       assign costs and pick the one with the lowest cost.
 
-  // Make sure we slow down if there is a car in our path
+  // Update the velocity of the following speed trajectory.
+  double distance_to_leading_car = 1E9;
   for (size_t i = 0; i < sensor_fusion.size(); ++i) {
     /*
       Map of adversary cars in sensor fusion array
@@ -180,61 +181,80 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
       // TODO: Safety distance should be elastic if it prevents a collision from
       //       a vehicle behind us that is moving too fast! And would depend on
       //       the vehicle's speed.
+      double distance = adversary_s - car_s;
       if (adversary_s > car_s &&  // The car is in front
-          (adversary_s-car_s) < 30  && // It is closer than the safety distance
+          distance < 30  && // It is closer than the safety distance
+          distance < distance_to_leading_car &&  // It is the closest car
           adversary_velocity < options[2].velocity) {  // It is moving slower than us
+        // We record the distance to the closest leading car
+        distance_to_leading_car = distance;
         // We match the speed
-        options[2].velocity = adversary_velocity;
+        options[2].velocity = adversary_velocity - 1;
+        //options[2].acceleration = -(options[2].velocity - current_velocity_) / ((options[2].velocity - current_velocity_) * (adversary_s - car_s));
+        options[2].acceleration = -pow(options[2].velocity - current_velocity_, 2) / distance;
       }
     }
   }
 
   // We calculate the acceleration and jerk based on a one second interval to
   // simplify the math.
-  double acceleration_time = (kControllerExecutionTime * (kPathPoints - 1));
-  double jerk_time = (kControllerExecutionTime * (kPathPoints - 2));
+  double time_delta = (kPathPoints - previous_path_size_) * kControllerExecutionTime;
+  //double acceleration_time = (kControllerExecutionTime * (kPathPoints - 1));
+  //double jerk_time = (kControllerExecutionTime * (kPathPoints - 2));
 
   // Now make sure we can achieve the required speed with the matching speed trajectory
   {
-    double acceleration = (options[2].velocity - current_velocity_) / acceleration_time;
+    /*
+    double acceleration = (options[2].velocity - current_velocity_) / time_delta;
     options[2].acceleration = Helpers::sign(acceleration) >= 0 ?
         min(acceleration, max_acceleration_) :
         max(acceleration, -max_acceleration_);
+    */
     // Top jerk out at the max, but try to increase slowly
-    double jerk = (options[2].acceleration - current_acceleration_) / jerk_time;
+    double jerk = (options[2].acceleration - current_acceleration_); // / time_delta;
     options[2].jerk = Helpers::sign(jerk) >= 0 ?
         min(jerk, max_jerk_) :
         max(jerk, -max_jerk_);
     // Backpropagate modifications
-    options[2].acceleration = current_acceleration_ + options[2].jerk * jerk_time;
-    options[2].velocity = current_velocity_ + options[2].acceleration * acceleration_time;
+    options[2].acceleration = current_acceleration_ + options[2].jerk; // * jerk_time;
+    options[2].velocity = current_velocity_ + options[2].acceleration * time_delta;
   }
 
   // Make sure that the target speed of the unbounded option is accurate
-  options[1].acceleration = current_acceleration_ + options[1].jerk * jerk_time;
-  options[1].velocity = current_velocity_ + options[1].acceleration * acceleration_time;
+  options[1].acceleration = current_acceleration_ + options[1].jerk; // * jerk_time;
+  options[1].velocity = LimitValue(current_velocity_ + options[1].acceleration * time_delta, max_velocity_);
+
+  // For the velocity keeping trajectory, if we were accelerating, decelerate
+  if (current_acceleration_ != 0.0) {
+    options[0].jerk = current_jerk_ - Helpers::sign(current_acceleration_) * 0.1;
+    options[0].acceleration = current_acceleration_ + options[0].jerk; // * jerk_time;
+    options[0].velocity = LimitValue(current_velocity_ + options[0].acceleration * time_delta, max_velocity_);
+  }
 
   // Calculate associated costs
   for (auto option = options.begin(); option != options.end(); ++option) {
-    // Cost of not matching the max speed. It has a cubic shape since we want
-    // big differences to have greater impact.
-    option->cost += pow(1 - (option->velocity / max_velocity_), 3) * 20;
-    // Not moving has a greater cost.
-    if (option->velocity == 0.0 && option->acceleration == 0.0) {
-      option->cost += 50;
-    }
-    //option->cost += max(abs(option->acceleration / max_acceleration_), 0.0) * 10;
+    // Avoid division by zero.
+    if (option->velocity == 0.0) option->velocity = 1E-9;
+    // Cost of not matching the max speed. It has a hyperbolic shape since we
+    // want big differences to have greater impact.
+    option->cost += (((max_velocity_ / option->velocity) - 1) / 100) * 40;
+    //option->cost += abs(option->acceleration / max_acceleration_) * 15;
     // The jerk cost is just based on the percentage of max jerk used.
-    option->cost += max(abs(option->jerk / max_jerk_), 0.0) * 15;
+    option->cost += abs(option->jerk / max_jerk_) * 10;
   }
 
   // Add cost based on collision possibility
-  for (auto option = options.begin(); option != options.begin() + 1; ++option) {
-    option->cost += max((option->velocity - options[2].velocity) / options[2].velocity, 0.0) * 100;
+  if (distance_to_leading_car < 30) {
+    for (auto option = options.begin(); option != options.end(); ++option) {
+      // TODO: It is not the speed but rather, how long before we hit the leading car at the current speed
+      option->cost += (max(option->velocity - options[2].velocity, 0.0) / distance_to_leading_car) * 1000;
+      //option->cost += max((option->velocity) / options[2].velocity, 0.0) * 100;
+      //option->cost += max((option->velocity - options[2].velocity) / options[2].velocity, 0.0) * 100;
+    }
   }
 
   for (auto option = options.begin(); option != options.end(); ++option) {
-    printf("%f (%f)\t", option->velocity, option->cost);
+    printf("%.2f,%.2f,%.2f (%f)\t", option->velocity, option->acceleration, option->jerk, option->cost);
   }
   printf("\n");
 

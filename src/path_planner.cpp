@@ -203,7 +203,7 @@ Trajectory PathPlanner::GenerateStraightTrajectory(
   default_random_engine gen(rd());
   normal_distribution<double> dist_s();
   */
-  int starting_lane = static_cast<int>(ceil(future_d / lane_width));
+  int starting_lane = CalculateLane(future_d);  //static_cast<int>(ceil(future_d / lane_width));
   pair<double, double> boundaries = GetLaneBoundary(starting_lane);
   Trajectory result;
   ptg_.FollowLaneAndLeadingCar(future_s, boundaries.first, boundaries.second,
