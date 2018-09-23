@@ -54,7 +54,7 @@ void PathPlanner::operator() (
 
   // Get our bearings
   vector<double> frenet = Helpers::getFrenet(car_x, car_y,
-                                                  car_yaw, maps_x_, maps_y_);
+                                             car_yaw, maps_x_, maps_y_);
   double current_s = frenet[0];
 
   if (previous_path_size == 0) {
@@ -77,8 +77,7 @@ void PathPlanner::operator() (
       previous_path_x, previous_path_y);
 
   // TODO: Calculate the cost of each successor state
-  double min_cost = 1E10;
-  Trajectory selected_trajectory;
+  vector<Trajectory> possible_trajectories;
   // max_speed, max_acceleration, max_jerk, last two points
   for (auto possible_state = possible_successor_states.begin();
       possible_state != possible_successor_states.end();
@@ -89,20 +88,25 @@ void PathPlanner::operator() (
     Target speed, accel and jerk are used to generate a trajectory
     but already take into account other cars on the road.
     */
-    auto trajectory_for_state = 
-        GenerateTrajectory(*possible_state, end_path_s, end_path_d, sensor_fusion);
+    //auto trajectory_for_state = 
+    GenerateTrajectory(*possible_state, possible_trajectories, end_path_s, end_path_d, sensor_fusion);
     /*
     float cost_for_state = calculate_cost(cref_this, predictions,
         trajectory_for_state);
     costs.push_back(cost_for_state);
     */
-    if (trajectory_for_state.cost < min_cost) {
-      min_cost = trajectory_for_state.cost;
-      current_state_ = *possible_state;
-      selected_trajectory = trajectory_for_state;
+  }
+
+  // TODO: Choose the successor state and path with less cost
+  double min_cost = 1E10;
+  Trajectory selected_trajectory;
+  for (auto trajectory = possible_trajectories.begin(); trajectory != possible_trajectories.end(); ++trajectory) {
+    if (trajectory->cost < min_cost) {
+      min_cost = trajectory->cost;
+      current_state_ = trajectory->state;
+      selected_trajectory = *trajectory;
     }
   }
-  // TODO: Choose the successor state and path with less cost
 
   // First we use up all points left over from previous path definition
   // TODO: I am uncomfortable with looping. See if we can directly assign.
@@ -116,6 +120,8 @@ void PathPlanner::operator() (
     new_x.push_back(selected_trajectory.x[i]);
     new_y.push_back(selected_trajectory.y[i]);
   }
+
+  // TODO: Update the current lane if we end up changing
 }
 
 vector<int> PathPlanner::GetPossibleSuccessorStates() {
@@ -172,21 +178,37 @@ void PathPlanner::PredictAdversariesPositions(
   }
 }
 
-Trajectory PathPlanner::GenerateTrajectory(int possible_state,
+void PathPlanner::GenerateTrajectory(int possible_state,
+    vector<Trajectory>& possible_trajectories,
     double future_s,
     double future_d,
     nlohmann::json sensor_fusion) {
+  double target_d = future_d;
+  int target_lane = CalculateLane(target_d);
+  pair<double, double> target_lane_boundaries;
+  size_t trajectories = possible_trajectories.size();
   switch (possible_state) {
     case PlannerStates::kChangeLaneLeft:
-      return {std::vector<double>(), std::vector<double>(), 1E10};
+      target_lane -= 1;
+      target_lane_boundaries = GetLaneBoundary(target_lane);
+      target_d = (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
+      ptg_.ChangeLane(future_s, future_d, target_d, sensor_fusion, possible_trajectories);
       break;
     case PlannerStates::kChangeLaneRight:
-      return {std::vector<double>(), std::vector<double>(), 1E10};
+      target_lane += 1;
+      target_lane_boundaries = GetLaneBoundary(target_lane);
+      target_d = (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
+      ptg_.ChangeLane(future_s, future_d, target_d, sensor_fusion, possible_trajectories);
       break;
     case PlannerStates::kKeepLane:
     default:
-      return GenerateStraightTrajectory(future_s, future_d, sensor_fusion);
+      target_lane_boundaries = GetLaneBoundary(target_lane);
+      target_d = (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
+      possible_trajectories.push_back(GenerateStraightTrajectory(future_s, future_d, sensor_fusion));
       break;
+  }
+  for (auto trajectory = possible_trajectories.begin() + trajectories; trajectory != possible_trajectories.end(); ++trajectory) {
+    trajectory->state = possible_state;
   }
 }
 

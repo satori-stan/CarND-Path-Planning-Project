@@ -48,8 +48,9 @@ class PathPlanner {
   void PredictAdversariesPositions(const double seconds_into_the_future,
       nlohmann::json& sensor_fusion);
 
-  Trajectory GenerateTrajectory(
+  void GenerateTrajectory(
       int possible_state,
+      vector<Trajectory>& possible_trajectories,
       double future_s,
       double future_d,
       nlohmann::json predicted_sensor_fusion);

@@ -9,16 +9,33 @@
 
 using json = nlohmann::json;
 
+const size_t kPathPoints = 50;
+
 struct Trajectory {
+  int state;
+  double cost;
+  double s_velocity;
+  double s_acceleration;
+  double d_velocity;
+  double d_acceleration;
   std::vector<double> x;
   std::vector<double> y;
-  double cost;
 };
 
 struct SingleAxisTrajectoryBase {
   double velocity;
   double acceleration;
   double jerk;
+  double cost;
+};
+
+struct TwoAxesTrajectoryBase {
+  double s_velocity;
+  double s_acceleration;
+  double s_jerk;
+  double d_velocity;
+  double d_acceleration;
+  double d_jerk;
   double cost;
 };
 
@@ -49,28 +66,18 @@ class PolynomialTrajectoryGenerator {
       std::vector<double>& new_y);
 
   void FollowLaneAndLeadingCar(
-      /*
-      const std::vector<double>& maps_x,
-      const std::vector<double>& maps_y,
-      const std::vector<double>& maps_s,
-      */
       const double car_s,
       const double lane_start,
       const double lane_end,
       const json sensor_fusion,
-      /*
-      std::vector<double>& new_x,
-      std::vector<double>& new_y
-      */
-     Trajectory& out);
+      Trajectory& out);
 
-  void Generate(
-      const std::vector<double>& maps_x,
-      const std::vector<double>& maps_y,
-      const std::vector<double>& maps_s,
-      const json::value_type sensor_data,
-      std::vector<double>& new_x,
-      std::vector<double>& new_y);
+  void ChangeLane(
+      const double car_s,
+      const double current_d,
+      const double target_d,
+      const json sensor_fusion,
+      std::vector<Trajectory>& out);
 
   void AssignBase(const double current_x,
                   const double current_y,
@@ -81,7 +88,6 @@ class PolynomialTrajectoryGenerator {
  private:
   
   const double kControllerExecutionTime = 0.02;  // In s  // TODO: Avoid duplication
-  const size_t kPathPoints = 50;
 
   void CartesianShift(std::vector<double>& x, std::vector<double>& y);
   void CartesianUnshift(std::vector<double>& x, std::vector<double>& y);
@@ -98,6 +104,7 @@ class PolynomialTrajectoryGenerator {
   double max_jerk_;
   // In mph
   double target_speed_;
+  // In global coordinates
   double reference_x_;
   double reference_y_;
   double reference_angle_;
@@ -105,7 +112,6 @@ class PolynomialTrajectoryGenerator {
   double current_velocity_;
   double current_acceleration_;
   double current_jerk_;
-  int current_lane_;
   size_t previous_path_size_;
 
   std::vector<double> maps_x_;
