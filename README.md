@@ -69,6 +69,8 @@ Cost gains are as varied as 100 and 2, given the number of scenarios analyzed. T
 
 The scenarios, formulas and gains are documented in the included [Excel file](./Cases.xlsm).
 
+One particular issue was that in tight curves, the space was warped after the Frenet coordinate transformation, which meant that adversary vehicles that in normal coordinates would be within collision distance, appeared not to be. A simple solution was to increase the safety buffers, but this is an incomplete solution since it affects the behavior in straighter stretches of road.
+
 #### The car should be able to make one complete loop
 
 Provided is an animation of the last few meters of the track. The indicators show that there were no incidents for the full length.
@@ -80,6 +82,32 @@ It is of course entirely possible to complete more than one loop, but the progra
 #### The car shouldn't experience total acceleration or jerk with a magnitude over 10
 
 This is probably one of the trickiest points, one that I am not sure is entirely solved. There are costs associated with going over the maximum speed, acceleration and jerk values, but having used the spline library these calculations proved to be extremely hard. Every now and again, the car will experience jerk and acceleration values that are too high.
+
+### Reflection on path generation
+
+For this project, based on the lesson's FAQ, I used a spline library to define trajectories. Another option is the one explored in the lesson: the Jerk Minimizing Trajectory.
+
+Any trajectory used for the self-driving car must be continuous and smooth in order to ensure the safety and comfort of the riders. Both methods ensure this but in different ways.
+
+A Jerk Minimizing Trajectory is commonly calculated with a high degree polynomial. A spline is a piecewise polynomial parametric curve. There are technical advantages of using a spline over a regular polynomial in that they are easy to calculate for computers and are guaranteed to be continuous and smooth. There are also practical advantages since the library is already available vs building a JMT module from scratch in C++.
+
+For our paths, the spline is calculated by using the last two points of the previous path, along with specifying two points in the future where our trajectory is expected to pass through. Since we are using Frenet coordinates (coordinates related to the road) that were translated to the car's point of view, adding the points becomes an exercise of adding a constant number of meters to our current position along the lane (S coordinate) and using the target lane's position (D coordinate).
+
+All paths falling in the same lane are calculated to 40 and 50 meters in front of the car, with the same position in the lane. The paths for switching lanes were calculated with a constant point 50 meters away in the target lane and a point 20, 30 or 40 meters away (in the target lane as well) which would produce different D speed, acceleration and jerk, to be compared against the other options for worthiness in achieving the rest of the car's goals (speed, avoid collisions, etc.).
+
+The program provides seven options of same-lane trajectories:
+* Same speed
+* Same acceleration
+* Increased acceleration in three ranges
+* Breaking in two ranges
+
+Some of the options would end up repeating one another: if the current acceleration is zero, it has the same result as the "same speed" option.
+
+There are nine options for each of the change-lane trajectories based on a combination of "S travel to reach the next lane" (20, 30 or 40 meters) and S accelerations (current acceleration, zero acceleration or increased current acceleration). Here again, some options would be repeated.
+
+In total, when the car is in the middle lane, there are 25 options to choose from, which is where cost calculation comes in.
+
+I would like to point out that, while convenient, there is a disadvantage of using the spline: the calculation of the speeds and accelerations becomes harder. With a regular polynomial, speed and acceleration can be calculated with the derivatives of the equation (i.e. analytically). This is not available with the spline, so the calculation must be done numerically, which is prone to errors. The code as presented will still sometimes go over the maximum values.
 
 ## Basic Build Instructions
 
