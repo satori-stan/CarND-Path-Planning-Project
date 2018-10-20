@@ -1,16 +1,87 @@
 # CarND-Path-Planning-Project
 Self-Driving Car Engineer Nanodegree Program
-   
-### Simulator.
+
+## Simulator.
+
 You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
 
-### Goals
-In this project your goal is to safely navigate around a virtual highway with other traffic that is driving +-10 MPH of the 50 MPH speed limit. You will be provided the car's localization and sensor fusion data, there is also a sparse map list of waypoints around the highway. The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too. The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another. The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop. Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
+## Goals
 
-#### The map of the highway is in data/highway_map.txt
-Each waypoint in the list contains  [x,y,s,dx,dy] values. x and y are the waypoint's map coordinate position, the s value is the distance along the road to get to that waypoint in meters, the dx and dy values define the unit normal vector pointing outward of the highway loop.
+In this project the goal is to safely navigate around a virtual highway with other traffic that is driving +/-10 MPH of the 50 MPH speed limit. From the car's subsystems, we will be provided with the car's localization and sensor fusion data, there is also a sparse map list of waypoints around the highway.
 
-The highway's waypoints loop around so the frenet s value, distance along the road, goes from 0 to 6945.554.
+A successful implementation requires:
+
+* Code that compiles correctly with CMake and Make
+* The car should try to go as close as possible to the 50 MPH speed limit, which means passing slower traffic when possible, note that other cars will try to change lanes too.
+* The car should avoid hitting other cars at all cost as well as driving inside of the marked road lanes at all times, unless going from one lane to another.
+* The car should be able to make one complete loop around the 6946m highway. Since the car is trying to go 50 MPH, it should take a little over 5 minutes to complete 1 loop.
+* Also the car should not experience total acceleration over 10 m/s^2 and jerk that is greater than 10 m/s^3.
+
+
+### Here I will consider each point individually and explain how I addressed them in my implementation
+
+#### Compilation
+
+The starter code provided for the project was already meant to compile correctly in Linux, Mac and Windows; although compilation in Windows required installing Windows 10 Bash on Ubuntu or using Docker to create a virtual environment.
+
+In previous projects for this degree, I had chosen to develop natively in Windows. This presented some issues, but after the first project of the second term (Extended Kalman Filter) I had an environment that would allow me to build most other projects.
+
+There are a couple of changes in the CMakeLists file to include all the source files and for native compilation in Windows. I also included some Macros to allow compilation against either uWebSockets version v0.14.x or previous versions, which caused issues in the last project review.
+
+#### The car should try to go as close as possible to the 50 MPH speed limit.
+
+The base of the logic is a FSM (finite state machine) with four states: start-up, stay on lane, change lane right and change lane left. 
+
+The start state is only ever used when the simulation begins and the car is stopped. The car immediately switches to the "stay on lane" state. This state and the "change lane" states are selected based on whether they are possible within the environment's limitations (the car can't change to a lane with oncoming traffic or that is outside the road) and they represent the best state to achieve all the requirements of the goal.
+
+The environment's limitations are quite clear (only those two stated above), but to choose the best state to achieve all the requirement's goals there are a number of competing concerns (go fast, avoid collisions, stay in the lane, etc.). To choose the best state means to balance the importance of each of these concerns, which is done using cost functions.
+
+For each possible state, the trajectory generator will propose at least a couple of options (with more or less acceleration) and the path planner will choose the one with the least cost. The next state is then based on the state that the winning trajectory represents.
+
+The cost function to push the car to drive as close as possible to the speed limit, penalizes lower speeds. The function is different than those used in the lessons: the logistic function meant to keep the cost base between 0 and 1 was great for values that were far from one another but as the ratio between the current speed and the maximum speed approached the limits, the difference was less discernible. The function used is:
+
+    ```
+    max((target_speed - current_speed) / (current_speed + 1), 0) / target_speed
+    ```
+
+A differential between the target speed and the current speed is divided by the current speed. This arrangement is because the cost is inversely proportional to the current speed. Adding 1 to the current speed in the divisor prevents a division by zero and while it reduces the usable range of values, it still provides good resolution.
+
+I max out the cost at zero (i.e. there is no gain in going over the target speed). The final division by the target speed keeps the cost base at or below 1 (given the car doesn't go in reverse!).
+
+The cost "gain" of this "efficiency" measurement is (in its current state) the largest one (250).
+
+In order to get the car moving, there is an extra cost of 100 if the speed is zero, and 50 extra if the speed is negative (reverse).
+
+Speed gain is not the only concern though: changing lanes just to get a speed boost (as when done in a curve) is discouraged if the road is clear in front of us.
+
+#### The car should avoid hitting other cars
+
+There are a lot of variables to consider to avoid hitting other cars. For each of the proposed trajectories, a check is done against all the known adversaries (from the sensor fusion) to identify the closest in front of the car in its current location (both in the current and target lanes), the closest behind the car in its current location in the target lane, and the closest in front and behind the car in its final position in the target lane. The velocities of the adversaries are also taken into account.
+
+The considerations are:
+* The distance between the car and the adversary in front given the final position should be as much as possible greater than a safety distance (30m).
+* The time to hit a car that is in front of us given the current and target positions in the target lane should always be over 10 seconds, regardless of the distance. This is calculated with the difference between the car's and aversaries' velocities and the distance between one another.
+* The time for a car to hit us from behind given the current and target positions in the target lane should always be over 10 seconds, regardless of the distance.
+* An adversary should never be within the vehicle radius in front of behind our position (current or target).
+* The same adversary shouldn't be in front of us in our current position or behind us in the target position in the target lane.
+
+Trying to change lane and coming up short of the target lane is also penalized.
+
+Cost gains are as varied as 100 and 2, given the number of scenarios analized. To balance the competing concerns, key variables of each proposed trajectory are logged, as are the vehicle positions and are stored to make sure that gain modifications to get a specific outcome don't adversely affect the results expected in other scenarios.
+
+The scenarios, formulas and gains are documented in the included [Excel file](./Cases.xlsm).
+
+#### The car should be able to make one complete loop
+
+Provided is an animation of the last few meters of the track. The indicators show that there were no incidents for the full length.
+
+![The car completing one loop around the track](./final_moments.gif)
+
+It is of course entirely possible to complete more than one loop, but the program is not prepared yet to do so.
+
+#### The car shouldn't experience total acceleration or jerk with a magnitude over 10
+
+This is probably one of the trickiest points, one that I am not sure is entirely solved. There are costs associated with going over the maximum speed, acceleration and jerk values, but having used the spline library these calculations proved to be extremely hard. Every now and again, the car will experience jerk and acceleration values that are too high.
 
 ## Basic Build Instructions
 
@@ -19,7 +90,13 @@ The highway's waypoints loop around so the frenet s value, distance along the ro
 3. Compile: `cmake .. && make`
 4. Run it: `./path_planning`.
 
-Here is the data provided from the Simulator to the C++ Program
+### Relevant data
+
+#### The map of the highway is in data/highway_map.txt
+
+Each waypoint in the list contains  [x,y,s,dx,dy] values. x and y are the waypoint's map coordinate position, the s value is the distance along the road to get to that waypoint in meters, the dx and dy values define the unit normal vector pointing outward of the highway loop.
+
+The highway's waypoints loop around so the frenet s value, distance along the road, goes from 0 to 6945.554.
 
 #### Main car's localization Data (No Noise)
 
@@ -60,12 +137,6 @@ the path has processed since last time.
 
 2. There will be some latency between the simulator running and the path planner returning a path, with optimized code usually its not very long maybe just 1-3 time steps. During this delay the simulator will continue using points that it was last given, because of this its a good idea to store the last points you have used so you can have a smooth transition. previous_path_x, and previous_path_y can be helpful for this transition since they show the last points given to the simulator controller with the processed points already removed. You would either return a path that extends this previous path or make sure to create a new path that has a smooth transition with this last path.
 
-## Tips
-
-A really helpful resource for doing this project and creating smooth trajectories was using http://kluge.in-chemnitz.de/opensource/spline/, the spline function is in a single hearder file is really easy to use.
-
----
-
 ## Dependencies
 
 * cmake >= 3.5
@@ -86,55 +157,3 @@ A really helpful resource for doing this project and creating smooth trajectorie
     cd uWebSockets
     git checkout e94b6e1
     ```
-
-## Editor Settings
-
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
-
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
-
-## Code Style
-
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
-
-## Project Instructions and Rubric
-
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
-
