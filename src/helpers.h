@@ -31,6 +31,10 @@ class Helpers {
   // Transform from Frenet s,d coordinates to Cartesian x,y
   static vector<double> getXY(double s, double d, const vector<double> &maps_s, const vector<double> &maps_x, const vector<double> &maps_y);
 
+  static int UnsignedToSigned(unsigned x);
+
+  static double Logistic(double x);
+
 };
 
 #endif  // HELPERS_H_

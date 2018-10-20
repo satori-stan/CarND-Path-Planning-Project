@@ -41,7 +41,11 @@ class PathPlanner {
 
   // TODO: This is a property of the road we are on, not a constant but sparsely
   //       changed.
-  const double lane_width = 4;  // In m
+  const double kLaneWidth = 4;  // In m
+  // TODO: Safety distance should be elastic if it prevents a
+  //       collision from a vehicle behind us that is moving too fast!
+  //       And would depend on the vehicle's speed.
+  const double kSafetyDistance = 30;  // In m
 
   std::vector<int> GetPossibleSuccessorStates();
 
@@ -61,7 +65,16 @@ class PathPlanner {
       nlohmann::json sensor_fusion);
 
   int CalculateLane(double d);
+
   std::pair<double, double> GetLaneBoundary(int lane);
+
+  void CalculateCost(Trajectory& option, nlohmann::json sensor_fusion,
+                     double current_s, double current_d,
+                     double target_lane_start, double target_lane_end);
+
+  void CalculateCost2(Trajectory& option, nlohmann::json sensor_fusion,
+                     double current_s, double current_d,
+                     double target_lane_start, double target_lane_end);
 
   const std::vector<double>& maps_x_;
   const std::vector<double>& maps_y_;

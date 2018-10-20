@@ -13,11 +13,17 @@ const size_t kPathPoints = 50;
 
 struct Trajectory {
   int state;
+  int lane;
+  int total_size;
   double cost;
+  double s;
+  double d;
   double s_velocity;
   double s_acceleration;
+  double s_jerk;
   double d_velocity;
   double d_acceleration;
+  double avg_d_acceleration;
   std::vector<double> x;
   std::vector<double> y;
 };
@@ -67,10 +73,11 @@ class PolynomialTrajectoryGenerator {
 
   void FollowLaneAndLeadingCar(
       const double car_s,
+      const double current_d,
       const double lane_start,
       const double lane_end,
       const json sensor_fusion,
-      Trajectory& out);
+      std::vector<Trajectory>& out);
 
   void ChangeLane(
       const double car_s,
@@ -84,6 +91,10 @@ class PolynomialTrajectoryGenerator {
                   const double current_theta,
                   const std::vector<double>& previous_path_x,
                   const std::vector<double>& previous_path_y);
+
+  double current_velocity_;
+  double current_acceleration_;
+  double current_normal_acceleration_;
 
  private:
   
@@ -109,8 +120,6 @@ class PolynomialTrajectoryGenerator {
   double reference_y_;
   double reference_angle_;
 
-  double current_velocity_;
-  double current_acceleration_;
   double current_jerk_;
   size_t previous_path_size_;
 

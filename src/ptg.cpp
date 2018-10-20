@@ -20,6 +20,7 @@ PolynomialTrajectoryGenerator::PolynomialTrajectoryGenerator(
   target_speed_(0.0),
   current_velocity_(0.0),
   current_acceleration_(0.0),
+  current_normal_acceleration_(0.0),
   current_jerk_(0.0),
   previous_path_size_(0),
   maps_x_(maps_x),
@@ -99,7 +100,7 @@ void PolynomialTrajectoryGenerator::FollowLane(
   // Choose (two?) points ahead to draw a line. Thinking of a similar distance
   // increment, distance_increment * 25 and distance_increment * 50.
   std::vector<double> cartesian;
-  cartesian = Helpers::getXY(current_s + 25, current_d, maps_s, maps_x, maps_y);
+  cartesian = Helpers::getXY(current_s + 30, current_d, maps_s, maps_x, maps_y);
   x.push_back(cartesian[0]);
   y.push_back(cartesian[1]);
 
@@ -133,194 +134,90 @@ double LimitValue (double new_value, double limit_value) {
 
 void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
     const double car_s,
+    const double current_d,
     const double lane_start,
     const double lane_end,
     const json sensor_fusion,
-    Trajectory& out) {
-
-  // Starting cost value
-  out.cost = 0;
+    vector<Trajectory>& out) {
 
   double target_speed = max_speed_;
+  // TODO: Turn into array of accelerations
   vector<SingleAxisTrajectoryBase> options{
     // First set is to keep velocity (no acceleration or jerk)
     {current_velocity_, 0.0, 0.0, 0.0},
     // Second set is unbound speed (but reach top speed "slowly")
-    {max_velocity_, 0.0, current_jerk_ + 0.1, 0.0},
+    {max_velocity_, current_acceleration_, current_jerk_ + 0.5, 0.0},
+    {max_velocity_, current_acceleration_ + 1.0, current_jerk_ + 0.5, 0.0},
+    {max_velocity_, current_acceleration_ + 0.6, current_jerk_ + 0.5, 0.0},
+    {max_velocity_, current_acceleration_ + 0.3, current_jerk_ + 0.5, 0.0},
+    {max_velocity_, current_acceleration_ - 1.0, current_jerk_ + 0.5, 0.0},
     // Third set is following speed (allow for hard breaking)
-    {current_velocity_, 0.0, max_jerk_, 0.0}};
-
-  // TODO: Sample paths with target velocities between the max and the current,
-  //       assign costs and pick the one with the lowest cost.
-
-  // Update the velocity of the following speed trajectory.
-  double distance_to_leading_car = 1E9;
-  for (size_t i = 0; i < sensor_fusion.size(); ++i) {
-    /*
-      Map of adversary cars in sensor fusion array
-      TODO: Use enum
-      0 unique ID
-      1 x position in map coordinates
-      2 y position in map coordinates
-      3 x velocity in m/s
-      4 y velocity in m/s
-      5 s position in frenet coordinates
-      6 d position in frenet coordinates
-      7 velocity magnitude
-      8 lane
-    */
-    double adversary_s = sensor_fusion[i][5];
-    double adversary_d = sensor_fusion[i][6];
-    double adversary_velocity = sensor_fusion[i][7];
-    // TODO: Account for cars that are moving into our lane!
-    if (adversary_d > lane_start && adversary_d < lane_end) {
-      // The other car is in our lane!
-      // TODO: Beware, the s value wraps around
-      // TODO: Make vehicle safety distance into a variable
-      // TODO: Safety distance should be elastic if it prevents a collision from
-      //       a vehicle behind us that is moving too fast! And would depend on
-      //       the vehicle's speed.
-      double distance = adversary_s - car_s;
-      if (adversary_s > car_s &&  // The car is in front
-          distance < 30  && // It is closer than the safety distance
-          distance < distance_to_leading_car &&  // It is the closest car
-          adversary_velocity < options[2].velocity) {  // It is moving slower than us
-        // We record the distance to the closest leading car
-        distance_to_leading_car = distance;
-        // We match the speed
-        options[2].velocity = adversary_velocity - 1;
-        //options[2].acceleration = -(options[2].velocity - current_velocity_) / ((options[2].velocity - current_velocity_) * (adversary_s - car_s));
-        options[2].acceleration = -pow(options[2].velocity - current_velocity_, 2) / distance;
-      }
-    }
-  }
+    {current_velocity_ - 5.0, current_acceleration_ - 2.0, -1.0, 0.0}};
 
   // We calculate the acceleration and jerk based on a one second interval to
   // simplify the math.
   double time_delta = (kPathPoints - previous_path_size_) * kControllerExecutionTime;
-  //double acceleration_time = (kControllerExecutionTime * (kPathPoints - 1));
-  //double jerk_time = (kControllerExecutionTime * (kPathPoints - 2));
 
-  // Now make sure we can achieve the required speed with the matching speed trajectory
-  {
-    /*
-    double acceleration = (options[2].velocity - current_velocity_) / time_delta;
-    options[2].acceleration = Helpers::sign(acceleration) >= 0 ?
-        min(acceleration, max_acceleration_) :
-        max(acceleration, -max_acceleration_);
-    */
-    // Top jerk out at the max, but try to increase slowly
-    double jerk = (options[2].acceleration - current_acceleration_); // / time_delta;
-    options[2].jerk = Helpers::sign(jerk) >= 0 ?
-        min(jerk, max_jerk_) :
-        max(jerk, -max_jerk_);
-    // Backpropagate modifications
-    options[2].acceleration = current_acceleration_ + options[2].jerk; // * jerk_time;
-    options[2].velocity = current_velocity_ + options[2].acceleration * time_delta;
-  }
-
-  // Make sure that the target speed of the unbounded option is accurate
-  options[1].acceleration = current_acceleration_ + options[1].jerk; // * jerk_time;
-  options[1].velocity = LimitValue(current_velocity_ + options[1].acceleration * time_delta, max_velocity_);
-
-  // For the velocity keeping trajectory, if we were accelerating, decelerate
-  if (current_acceleration_ != 0.0) {
-    options[0].jerk = current_jerk_ - Helpers::sign(current_acceleration_) * 0.1;
-    options[0].acceleration = current_acceleration_ + options[0].jerk; // * jerk_time;
-    options[0].velocity = LimitValue(current_velocity_ + options[0].acceleration * time_delta, max_velocity_);
-  }
-
-  // Calculate associated costs
-  for (auto option = options.begin(); option != options.end(); ++option) {
-    // Avoid division by zero.
-    if (option->velocity == 0.0) option->velocity = 1E-9;
-    // Cost of not matching the max speed. It has a hyperbolic shape since we
-    // want big differences to have greater impact.
-    option->cost += ((max_velocity_ / option->velocity) - 1) * 40;
-    //option->cost += abs(option->acceleration / max_acceleration_) * 15;
-    // The jerk cost is just based on the percentage of max jerk used.
-    option->cost += abs(option->jerk / max_jerk_) * 10;
-  }
-
-  // Add cost based on collision possibility
-  if (distance_to_leading_car < 30) {
-    for (auto option = options.begin(); option != options.end(); ++option) {
-      // TODO: It is not the speed but rather, how long before we hit the leading car at the current speed
-      option->cost += (max(option->velocity - options[2].velocity, 0.0) / distance_to_leading_car) * 1000;
-      //option->cost += max((option->velocity) / options[2].velocity, 0.0) * 100;
-      //option->cost += max((option->velocity - options[2].velocity) / options[2].velocity, 0.0) * 100;
-    }
-  }
-
-  for (auto option = options.begin(); option != options.end(); ++option) {
-    printf("%.2f,%.2f,%.2f (%f)\t", option->velocity, option->acceleration, option->jerk, option->cost);
-  }
-  printf("\n");
-
-  double target_d = (lane_end + lane_start) / 2.0;
-
-  vector<double> x(x_);
-  vector<double> y(y_);
-  // Choose (two?) points ahead to draw a line. Thinking of a similar distance
-  // increment, distance_increment * 30 and distance_increment * 60.
-  vector<double> cartesian;
-  cartesian = Helpers::getXY(car_s + 30, target_d, maps_s_, maps_x_, maps_y_);
-  //cartesian = Helpers::getXY((car_s + 30) % 6945.554, target_d, maps_s_, maps_x_, maps_y_);
-  x.push_back(cartesian[0]);
-  y.push_back(cartesian[1]);
-
-  cartesian = Helpers::getXY(car_s + 60, target_d, maps_s_, maps_x_, maps_y_);
-  //cartesian = Helpers::getXY((car_s + 60) % 6945.554, target_d, maps_s_, maps_x_, maps_y_);
-  x.push_back(cartesian[0]);
-  y.push_back(cartesian[1]);
-
-  // Now shift points to use the car's reference frame
-  CartesianShift(x, y);
-
-  // Now we use a spline (from http://kluge.in-chemnitz.de/opensource/spline/)
-  // to plot a smooth trajectory that touches all our points.
-  tk::spline spline;
-  spline.set_points(x, y);  // Set must be sorted by x ascending!!
-
-  // Then we create new points from the spline
-  // mph * km_per_mile * meters_per_km / seconds_per_hour
-  //double target_velocity = target_speed_ * 1.609344 * 1000 / 3600;  // In m/s
-  //double distance_increment = kControllerExecutionTime * target_velocity;  // path_points;
-  // Figure out a decent number of points that will let us plan 20m into the
-  // future.
-  /*
-  size_t path_points = min(static_cast<size_t>(100),
-      static_cast<size_t>((20 / distance_increment) + 0.5));
-  */
-
-  auto best = options.begin();
-  for (auto option = options.begin(); option != options.end(); ++option) {
-    if (option->cost < best->cost)
-      best = option;
-  }
-
-  out.cost = best->cost;
-  double delta = 0;
-  double velocity = current_velocity_;
-  double acceleration = LimitValue(current_acceleration_ + best->jerk, max_acceleration_);
   if (previous_path_size_ < kPathPoints) {
-    for (size_t i = 1; i <= (kPathPoints - previous_path_size_); ++i) {
-      double elapsed = i * kControllerExecutionTime;
-      //acceleration = LimitValue(current_acceleration_ + best->jerk * elapsed, max_acceleration_);
-      //acceleration = LimitValue(best->acceleration + best->jerk * elapsed, max_acceleration_);
-      velocity = LimitValue(current_velocity_ + acceleration * elapsed, max_velocity_);
-      //double delta = current_velocity_ * elapsed + acceleration * pow(elapsed, 2);
-      delta = velocity * elapsed;
-      printf("%f, %f\n", velocity, acceleration);
-      // TODO: Improve next line, it seems wasteful.
-      vector<double> calculated = CartesianUnshift(delta, spline(delta));
-      out.x.push_back(calculated[0]);
-      out.y.push_back(calculated[1]);
+    // TODO: Sample paths with target velocities between the max and the current,
+    //       assign costs and pick the one with the lowest cost.
+    for (auto option = options.begin(); option != options.end(); ++option) {
+      // Starting cost value
+      out.emplace_back();
+      Trajectory& trajectory = out.back();
+      trajectory.cost = 0;
+
+      double target_d = (lane_end + lane_start) / 2.0;
+
+      vector<double> x(x_);
+      vector<double> y(y_);
+      // Choose (two?) points ahead to draw a line. Thinking of a similar distance
+      // increment, distance_increment * 30 and distance_increment * 60.
+      vector<double> cartesian;
+      cartesian = Helpers::getXY(car_s + 30, target_d, maps_s_, maps_x_, maps_y_);
+      //cartesian = Helpers::getXY((car_s + 30) % 6945.554, target_d, maps_s_, maps_x_, maps_y_);
+      x.push_back(cartesian[0]);
+      y.push_back(cartesian[1]);
+
+      cartesian = Helpers::getXY(car_s + 60, target_d, maps_s_, maps_x_, maps_y_);
+      //cartesian = Helpers::getXY((car_s + 60) % 6945.554, target_d, maps_s_, maps_x_, maps_y_);
+      x.push_back(cartesian[0]);
+      y.push_back(cartesian[1]);
+
+      // Now shift points to use the car's reference frame
+      CartesianShift(x, y);
+
+      // Now we use a spline (from http://kluge.in-chemnitz.de/opensource/spline/)
+      // to plot a smooth trajectory that touches all our points.
+      tk::spline spline;
+      spline.set_points(x, y);  // Set must be sorted by x ascending!!
+
+      double delta = 0;
+      double velocity = current_velocity_;
+      trajectory.d_acceleration = current_normal_acceleration_ / 1.6180339;
+      double acceleration = option->acceleration - abs(trajectory.d_acceleration);
+      size_t i = 1;
+      for (; i < (kPathPoints - previous_path_size_); ++i) {
+        double elapsed = i * kControllerExecutionTime;
+        velocity = (current_velocity_ + (acceleration * elapsed));
+        delta = velocity * elapsed;
+        //printf("%f, %f\n", velocity, acceleration);
+        trajectory.d = spline(delta);
+        // TODO: Improve next line, it seems wasteful.
+        vector<double> calculated = CartesianUnshift(delta, trajectory.d);
+        trajectory.x.push_back(calculated[0]);
+        trajectory.y.push_back(calculated[1]);
+      }
+      trajectory.total_size = previous_path_size_ + i;
+      trajectory.s = delta + car_s;
+      trajectory.d = current_d - trajectory.d;
+      trajectory.s_velocity = velocity;
+      trajectory.s_acceleration = acceleration * 2.0;  // XXX: This is a hack, my acceleration calculations are off!
+      trajectory.s_jerk = abs(trajectory.s_acceleration - current_acceleration_);  // Approximation since we use points for one second
+      //trajectory.d_acceleration = 0.0;
+      //trajectory.avg_d_acceleration = 0.0;
     }
-    current_velocity_ = velocity;
-    current_acceleration_ = acceleration;
-    current_jerk_ = best->jerk;
-  }
+  } else printf("%u\n", previous_path_size_);
 }
 
 void PolynomialTrajectoryGenerator::AssignBase(
@@ -366,88 +263,127 @@ void PolynomialTrajectoryGenerator::AssignBase(
 
     reference_angle_ = atan2(reference_y_ - prev_reference_y,
                              reference_x_ - prev_reference_x);
-    // For the excersise, use the last calculated speed as the current speed. In
+    // For the excercise, use the last calculated speed as the current speed. In
     // a real setting, we would get this information from a sensor.
     /*
     current_velocity_ = sqrt(pow(reference_x_ - prev_reference_x, 2) +
                             pow(reference_y_ - prev_reference_y, 2)) /
                         kControllerExecutionTime;
 
-    double previous_velocity = current_velocity_;
-
+    */
+    //double previous_velocity = current_velocity_;
     if (previous_path_size_ > 2) {
-      vector<double> accelerations;
-      //size_t samples_for_a_second = static_cast<size_t>(1/kControllerExecutionTime) + 1;
-      for (size_t i = previous_path_size_ - 1; i >= 2; --i) {
-        double velocity = sqrt(pow(previous_x[i] - previous_x[i-1], 2) +
-                              pow(previous_y[i] - previous_y[i-1], 2)) /
+      vector<double> velocities;
+      size_t samples_for_a_second = static_cast<size_t>(1/kControllerExecutionTime) + 1;
+      for (size_t i = 0; i < previous_path_size_ - 1; ++i) {
+        double velocity = sqrt(pow(previous_x[i] - previous_x[i+1], 2) +
+                              pow(previous_y[i] - previous_y[i+1], 2)) /
                           kControllerExecutionTime;
-        accelerations.push_back(previous_velocity - velocity);
-        previous_velocity = velocity;
+        velocities.push_back(velocity);
       }
-      current_acceleration_ = accelerations[0];
+      size_t samples = min(samples_for_a_second, velocities.size()) - 1;
+      /*
+      current_acceleration_ = 0.0;
+      for (size_t i = 0; i < samples; ++i) {
+        current_acceleration_ += velocities[i + 1] - velocities[i];
+      }
+      current_acceleration_ /= (samples * kControllerExecutionTime);
+      */
+      current_velocity_ = velocities.back();
+      current_acceleration_ = (current_velocity_ - velocities.front()) / (samples * kControllerExecutionTime);
+      /*
       current_jerk_ = accumulate(accelerations.begin(), accelerations.end(),
           0.0) / (accelerations.size() * kControllerExecutionTime);
+      */
     }
-    */
   }
 }
 
 void PolynomialTrajectoryGenerator::ChangeLane(
     const double car_s,
-    // TODO: Might need current lane
     const double current_d,
     const double target_d,
     const json sensor_fusion,
     vector<Trajectory>& out) {
 
-  vector<double> x(x_);
-  vector<double> y(y_);
-  // Choose (two?) points ahead to draw a line. Thinking of a similar distance
-  // increment, distance_increment * 25 and distance_increment * 50.
-  std::vector<double> cartesian;
-  cartesian = Helpers::getXY(car_s + 30, target_d, maps_s_, maps_x_, maps_y_);
-  x.push_back(cartesian[0]);
-  y.push_back(cartesian[1]);
+  vector<pair<double, double> > variations {
+    {20, current_acceleration_},
+    {30, current_acceleration_},
+    {40, current_acceleration_},
+    {20, 0.0},
+    {30, 0.0},
+    {40, 0.0},
+    {20, current_acceleration_ + 0.6},
+    {30, current_acceleration_ + 0.6},
+    {40, current_acceleration_ + 0.6}};
 
-  cartesian = Helpers::getXY(car_s + 50, target_d, maps_s_, maps_x_, maps_y_);
-  x.push_back(cartesian[0]);
-  y.push_back(cartesian[1]);
+  for (auto variation = variations.begin(); variation != variations.end(); ++variation) {
+    vector<double> x(x_);
+    vector<double> y(y_);
+    // Choose (two?) points ahead to draw a line.
+    std::vector<double> cartesian;
+    cartesian = Helpers::getXY(car_s + variation->first, target_d, maps_s_, maps_x_, maps_y_);
+    x.push_back(cartesian[0]);
+    y.push_back(cartesian[1]);
 
-  // Now shift points to use the car's reference frame
-  CartesianShift(x, y);
+    cartesian = Helpers::getXY(car_s + 60, target_d, maps_s_, maps_x_, maps_y_);
+    x.push_back(cartesian[0]);
+    y.push_back(cartesian[1]);
 
-  // Now we use a spline (from http://kluge.in-chemnitz.de/opensource/spline/)
-  // to plot a smooth trajectory that touches all our points.
-  tk::spline spline;
-  spline.set_points(x, y);  // Set must be sorted by x ascending!!
+    // Now shift points to use the car's reference frame
+    CartesianShift(x, y);
 
-  // Allocate a new position in the output vector
-  out.emplace_back();
-  auto trajectory = out.end() - 1;
+    // Now we use a spline (from http://kluge.in-chemnitz.de/opensource/spline/)
+    // to plot a smooth trajectory that touches all our points.
+    tk::spline spline;
+    spline.set_points(x, y);  // Set must be sorted by x ascending!!
 
-  //double available_points = kPathPoints - previous_path_size_;
-  double s_velocity = current_velocity_;
-  double d_velocity = 0.0;
-  double lane_change_approximate_velocity =
-      abs((target_d - current_d) / (30 / current_velocity_));
-  double d = current_d;
-  size_t i = 0;
-  while (abs(d - target_d) > (/*lane_width*/ 5 / 2.0) && i < kPathPoints) {
-    double elapsed = ++i * kControllerExecutionTime;
-    d_velocity = (lane_change_approximate_velocity * exp(-pow(elapsed - 30/current_velocity_, 2) / (2 * pow(30/current_velocity_/4, 2))));
-    s_velocity = (current_velocity_ + (current_acceleration_ * elapsed)) - d_velocity;
-    double s = s_velocity * elapsed;
-    printf("delta %f, normal %f, perpendicular %f\n", abs(d - target_d), s_velocity, d_velocity);
-    double d_delta = spline(s);
-    d -= d_delta;
-    vector<double> calculated = CartesianUnshift(s, d_delta);
-    trajectory->x.push_back(calculated[0]);
-    trajectory->y.push_back(calculated[1]);
+    // Allocate a new position in the output vector
+    out.emplace_back();
+    Trajectory& trajectory = out.back();
+
+    double d_velocity_0 = 0.0;
+    double lane_change_approximate_velocity =
+        abs((target_d - current_d) / (variation->first / current_velocity_));  // 1.6180339;
+    double change_timespan = variation->first / current_velocity_;
+    double s_velocity = pow(current_velocity_, 2) - pow(lane_change_approximate_velocity, 2);
+    trajectory.d_acceleration = (lane_change_approximate_velocity - d_velocity_0) / change_timespan;
+    trajectory.s_acceleration = pow(variation->second, 2) - pow(abs(trajectory.d_acceleration), 2);
+    double s = 0.0;
+    double last_s = s;
+    double last_d = 0.0;
+    size_t i = 0;
+    while (abs(current_d - target_d - trajectory.d) > (/*lane_width*/ 1.0) &&
+        i < kPathPoints * 2) {
+      double elapsed = ++i * kControllerExecutionTime;
+      /*
+      double d_velocity_1 = lane_change_approximate_velocity * exp(
+        -pow(elapsed - (change_timespan / 2), 2) / (2 * pow(change_timespan / 6, 2))
+      );
+      */
+      //d_velocity_0 = d_velocity_1;
+      //trajectory.max_d_acceleration = max(abs(trajectory.d_acceleration), trajectory.max_d_acceleration);
+      s_velocity = (current_velocity_ + (trajectory.s_acceleration * elapsed));
+      s = s_velocity * elapsed;
+      //printf("delta %f, tangential %f, normal %f\n", abs(current_d - target_d - d_delta), s_velocity, d_velocity_1);
+      trajectory.d = spline(s);
+      trajectory.d_velocity = (trajectory.d - last_d) / kControllerExecutionTime;
+      trajectory.avg_d_acceleration = (trajectory.avg_d_acceleration * (i - 1) + (trajectory.d_velocity - d_velocity_0)) / i;
+      d_velocity_0 = trajectory.d_velocity;
+      last_d = trajectory.d;
+      trajectory.s_velocity = (s - last_s) / kControllerExecutionTime;
+      last_s = s;
+      vector<double> calculated = CartesianUnshift(s, trajectory.d);
+      trajectory.x.push_back(calculated[0]);
+      trajectory.y.push_back(calculated[1]);
+    }
+    trajectory.total_size = previous_path_size_ + i;
+    trajectory.s = car_s + s;
+    trajectory.d = current_d - trajectory.d;
+    //trajectory.s_velocity = s_velocity;
+    trajectory.s_jerk = abs(trajectory.s_acceleration - current_acceleration_);  // Approximation since we use points for one second
+    //printf("--\n");
   }
-  trajectory->cost = 1E10;
-  //current_velocity_ = s_velocity;
-  printf("--\n");
 }
 
 void PolynomialTrajectoryGenerator::CartesianShift(std::vector<double>& x,

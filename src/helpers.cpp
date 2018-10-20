@@ -16,13 +16,13 @@ int Helpers::ClosestWaypoint(double x, double y,
   double closestLen = 100000; //large number
   int closestWaypoint = 0;
 
-  for (int i = 0; i < maps_x.size(); i++) {
+  for (size_t i = 0; i < maps_x.size(); ++i) {
     double map_x = maps_x[i];
     double map_y = maps_y[i];
     double dist = Helpers::distance(x,y,map_x,map_y);
     if (dist < closestLen) {
       closestLen = dist;
-      closestWaypoint = i;
+      closestWaypoint = Helpers::UnsignedToSigned(i);
     }
 
   }
@@ -126,4 +126,18 @@ vector<double> Helpers::getXY(double s, double d,
 
   return {x,y};
 
+}
+
+int Helpers::UnsignedToSigned(unsigned x) {
+  if (x <= INT_MAX)
+      return static_cast<int>(x);
+
+  if (x >= INT_MIN)
+      return static_cast<int>(x - INT_MIN) + INT_MIN;
+
+  throw x;
+}
+
+double Helpers::Logistic(double x) {
+  return 2.0 / (1 + exp(-x)) - 1.0;
 }
