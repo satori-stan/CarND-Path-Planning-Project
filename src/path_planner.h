@@ -72,10 +72,6 @@ class PathPlanner {
                      double current_s, double current_d,
                      double target_lane_start, double target_lane_end);
 
-  void CalculateCost2(Trajectory& option, nlohmann::json sensor_fusion,
-                     double current_s, double current_d,
-                     double target_lane_start, double target_lane_end);
-
   const std::vector<double>& maps_x_;
   const std::vector<double>& maps_y_;
   const std::vector<double>& maps_s_;

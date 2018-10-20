@@ -1,6 +1,5 @@
 #include "path_planner.h"
 
-//#include <random>
 #include "helpers.h"
 #include "ptg.h"
 
@@ -61,7 +60,6 @@ void PathPlanner::operator() (
     end_path_s = car_s;
     end_path_d = car_d;
   }
-  //current_lane_ = CalculateLane(end_path_d);
 
   // TODO: Make constant
   double controller_execution_time = 0.02;  // In s
@@ -78,24 +76,28 @@ void PathPlanner::operator() (
 
   // TODO: Calculate the cost of each successor state
   vector<Trajectory> possible_trajectories;
-  // max_speed, max_acceleration, max_jerk, last two points
+
   for (auto possible_state = possible_successor_states.begin();
       possible_state != possible_successor_states.end();
       ++possible_state) {
-    // TODO: Generate trajectory for: same speed, faster
     /*
     What changes between possible successor states? The target lane.
     Target speed, accel and jerk are used to generate a trajectory
     but already take into account other cars on the road.
     */
-    GenerateTrajectory(*possible_state, possible_trajectories, end_path_s, end_path_d, sensor_fusion);
+    GenerateTrajectory(*possible_state, possible_trajectories, end_path_s,
+        end_path_d, sensor_fusion);
   }
   printf("\n");
 
   // Choose the successor state and path with less cost
   double min_cost = 1E10;
   Trajectory selected_trajectory;
-  for (auto trajectory = possible_trajectories.begin(); trajectory != possible_trajectories.end(); ++trajectory) {
+
+  for (auto trajectory = possible_trajectories.begin();
+      trajectory != possible_trajectories.end();
+      ++trajectory) {
+
     //printf("%i %f\t", trajectory->state, trajectory->cost);
     if (trajectory->cost < min_cost) {
       min_cost = trajectory->cost;
@@ -176,7 +178,8 @@ void PathPlanner::PredictAdversariesPositions(
     sensor_fusion[i][5] = future_adversary_s;
     sensor_fusion[i][7] = adversary_velocity;
     sensor_fusion[i][8] = adversary_lane;
-    printf("%f\t%f\t%f\t%i\n", future_adversary_s, adversary_d, adversary_velocity, adversary_lane);
+    printf("%f\t%f\t%f\t%i\n", future_adversary_s, adversary_d,
+        adversary_velocity, adversary_lane);
   }
   printf("\n");
 }
@@ -186,34 +189,50 @@ void PathPlanner::GenerateTrajectory(int possible_state,
     double future_s,
     double future_d,
     nlohmann::json sensor_fusion) {
+
   double target_d = future_d;
   int target_lane = CalculateLane(target_d);
   pair<double, double> target_lane_boundaries;
   size_t trajectories = possible_trajectories.size();
+
   switch (possible_state) {
     case PlannerStates::kChangeLaneLeft:
       target_lane -= 1;
       target_lane_boundaries = GetLaneBoundary(target_lane);
-      target_d = (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
-      ptg_.ChangeLane(future_s, future_d, target_d, sensor_fusion, possible_trajectories);
+      target_d =
+          (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
+      ptg_.ChangeLane(future_s, future_d, target_d, sensor_fusion,
+          possible_trajectories);
       break;
+
     case PlannerStates::kChangeLaneRight:
       target_lane += 1;
       target_lane_boundaries = GetLaneBoundary(target_lane);
-      target_d = (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
-      ptg_.ChangeLane(future_s, future_d, target_d, sensor_fusion, possible_trajectories);
+      target_d =
+          (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
+      ptg_.ChangeLane(future_s, future_d, target_d, sensor_fusion,
+          possible_trajectories);
       break;
+
     case PlannerStates::kKeepLane:
     default:
       target_lane_boundaries = GetLaneBoundary(target_lane);
-      target_d = (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
-      ptg_.FollowLaneAndLeadingCar(future_s, future_d, target_lane_boundaries.first, target_lane_boundaries.second, sensor_fusion, possible_trajectories);
+      target_d =
+          (target_lane_boundaries.first + target_lane_boundaries.second) / 2.0;
+      ptg_.FollowLaneAndLeadingCar(future_s, future_d,
+          target_lane_boundaries.first, target_lane_boundaries.second,
+          sensor_fusion, possible_trajectories);
       break;
   }
-  for (auto trajectory = possible_trajectories.begin() + trajectories; trajectory != possible_trajectories.end(); ++trajectory) {
+
+  for (auto trajectory = possible_trajectories.begin() + trajectories;
+      trajectory != possible_trajectories.end();
+      ++trajectory) {
+
     trajectory->state = possible_state;
     trajectory->lane = target_lane;
-    CalculateCost2(*trajectory, sensor_fusion, future_s, future_d, target_lane_boundaries.first, target_lane_boundaries.second);
+    CalculateCost(*trajectory, sensor_fusion, future_s, future_d,
+        target_lane_boundaries.first, target_lane_boundaries.second);
   }
 }
 
@@ -223,8 +242,6 @@ int PathPlanner::CalculateLane(double d) {
 
 pair<double, double> PathPlanner::GetLaneBoundary(int lane) {
   // Leftmost lane is 1
-  //int current_lane = static_cast<int>(ceil(car_d / lane_width));
-  //double d = (lane - 0.5) * lane_width;
   double lane_start = kLaneWidth * (lane - 1);
   double lane_end = kLaneWidth * lane;
   return {lane_start, lane_end};
@@ -236,145 +253,10 @@ void PathPlanner::CalculateCost(Trajectory& option,
     double current_d,
     double target_lane_start,
     double target_lane_end) {
-  double max_velocity = max_speed_ * 1.609344 * 1000 / 3600;
-  printf("%u(%u-%u): #[%u] s[%.2f] d[%.2f] s_dot[%.2f] s_dot2[%.2f] s_dot3[%.2f] d_dot[%.2f] d_dot2[%.2f] ",
-      option.state,
-      current_lane_,
-      option.lane,
-      option.total_size,
-      option.s,
-      option.d,
-      option.s_velocity,
-      option.s_acceleration,
-      option.s_jerk,
-      option.d_velocity,
-      option.d_acceleration);
-  // The cost of plotting too much into the future
-  int expected_points = Helpers::UnsignedToSigned(kPathPoints);
-  option.cost += Helpers::Logistic(max(
-      (Helpers::UnsignedToSigned(option.total_size) - expected_points) /
-      (expected_points * 1.0), 0.0)) * 37.0;
-  printf("C1[%.4f] ", option.cost);
-  // Cost of not moving
-  option.cost += (option.s_velocity <= 0.0 ? 1 : 0) * 100.0;
-  // Cost of going in reverse
-  option.cost += (option.s_velocity < 0.0 ? 1 : 0) * 1E6;
-  // Avoid division by zero
-  if (option.s_velocity == 0.0) option.s_velocity = 1E-9;
-  if (option.s_acceleration == 0.0) option.s_acceleration = 1E-9;
-  // Cost of not matching the max speed. It has a hyperbolic shape since we
-  // want big differences to have greater impact.
-  //option.cost += ((max_velocity / option.s_velocity) - 1) * 60;
-  // Cost of going too slow
-  option.cost += Helpers::Logistic((max_velocity - option.s_velocity) / (abs(option.s_velocity) + 1)) * 30.0;
-  printf("C1[%.4f] ", option.cost);
-  // Cost of going over the speed limit
-  option.cost += (option.s_velocity > max_velocity ? 1 : 0) * 300.0;
-  // Cost of going over the acceleration limit
-  option.cost += (option.s_acceleration > max_acceleration_ ? 1 : 0) * 200.0;
-  // Cost of high acceleration
-  option.cost += exp(-(max_acceleration_ - abs(option.s_acceleration)) / abs(option.s_acceleration)) * 2.0;
-  printf("C1[%.4f] ", option.cost);
-  // Cost of risking going in reverse
-  option.cost += (option.s_velocity < abs(option.s_acceleration) ? 1 : 0) *   100.0;
-  printf("C1[%.4f] ", option.cost);
-  // The cost of the max potential tangential jerk
-  option.cost += exp(-(max_jerk_ - option.s_jerk) / option.s_jerk) * 10.0;
-  printf("C1[%.4f] ", option.cost);
-  // The cost of not reaching the target lane
-  option.cost += ((option.d > target_lane_end) ? (option.d - target_lane_end) / kLaneWidth : 0) * 50.0;
-  option.cost += ((option.d < target_lane_start) ? (target_lane_start - option.d) / kLaneWidth : 0) * 50.0;
-  printf("C1[%.4f] ", option.cost);
-  // The cost of accelerating tangential
-  option.cost += abs(option.d_acceleration / max_acceleration_) * 50.0;
 
-  printf("C1[%.4f] ", option.cost);
-  int target_lane = option.lane;
-  double a = current_d - option.d;
-  double b = option.s - current_s;
-  double intercept = current_d - (-a / b) * current_s;
-  double c = intercept * -b;
-  double normal = sqrt(a * a + b * b);
-  double distance_to_current_leading_car = 1E9;
-  double current_leading_car_s_velocity = 100.0;
-  double distance_to_future_leading_car = 1E9;
-  double future_leading_car_s_velocity = 100.0;
-  double distance_to_closest_car = 1E9;
-  for (size_t i = 0; i < sensor_fusion.size(); ++i) {
-    /*
-      Map of adversary cars in sensor fusion array
-      TODO: Use enum
-      0 unique ID
-      1 x position in map coordinates
-      2 y position in map coordinates
-      3 x velocity in m/s
-      4 y velocity in m/s
-      5 s position in frenet coordinates
-      6 d position in frenet coordinates
-      7 velocity magnitude
-      8 lane
-    */
-    double adversary_s = sensor_fusion[i][5];
-    double adversary_d = sensor_fusion[i][6];
-    double adversary_velocity = sensor_fusion[i][7];
-    int adversary_lane = sensor_fusion[i][8];
-    // Consider only cars which are in front of us or "right" behind us.
-    if (adversary_s >= (current_s - (kSafetyDistance / 2))) {
-      // If we are not changing lanes
-        // For cars that are on the lane we intend to be
-        // TODO: Account for cars that are moving into our lane!
-        // TODO: Beware, the s value wraps around
-      double s_distance_from_current = adversary_lane == current_lane_ ? adversary_s - option.s : 1E9;
-      if (adversary_lane == current_lane_ &&
-          // It is the closest car in front of where we are
-          s_distance_from_current < distance_to_current_leading_car) {
-          distance_to_current_leading_car = max(s_distance_from_current, 0.0);
-          current_leading_car_s_velocity = adversary_velocity;
-      }
-      double s_distance_from_target = adversary_lane == target_lane ? adversary_s - option.s : 1E9;
-      if (adversary_lane == target_lane &&
-          // It is the closest car in front of where we will be
-          s_distance_from_target < distance_to_future_leading_car) {
-          distance_to_future_leading_car = max(s_distance_from_target, 0.0);
-          future_leading_car_s_velocity = adversary_velocity;
-      }
-      double normal_distance = abs(a * adversary_s + b * adversary_d + c) / normal;
-      // When changing lanes, consider the cars in current and target lanes
-      if (adversary_lane == current_lane_ || adversary_lane == target_lane &&
-          // It is the closest car
-          normal_distance < distance_to_closest_car) {
-        distance_to_closest_car = normal_distance;
-      }
-    }
-  }
-  // Factor in how long before we hit the leading car at the current speed
-  if (option.s_velocity - current_leading_car_s_velocity > 0.0 &&
-      distance_to_current_leading_car < kSafetyDistance) {
-    option.cost += Helpers::Logistic(
-        (option.s_velocity - current_leading_car_s_velocity) /
-        max(distance_to_current_leading_car, 1E-9)) * 100;
-  }
-  if (option.s_velocity - future_leading_car_s_velocity > 0.0 &&
-      distance_to_future_leading_car < kSafetyDistance) {
-    option.cost += Helpers::Logistic(
-        (option.s_velocity - future_leading_car_s_velocity) /
-        max(distance_to_future_leading_car, 1E-9)) * 100;
-  }
-  if (distance_to_closest_car < kSafetyDistance) {
-    option.cost += max(Helpers::Logistic((kSafetyDistance - distance_to_closest_car) / max(distance_to_closest_car, 0.0)), 0.0) * 5.0;
-  }
-  printf("C2[%.4f]", option.cost);
-  printf("\n");
-}
-
-void PathPlanner::CalculateCost2(Trajectory& option,
-    nlohmann::json sensor_fusion,
-    double current_s,
-    double current_d,
-    double target_lane_start,
-    double target_lane_end) {
   double max_velocity = max_speed_ * 1.609344 * 1000 / 3600;
-  printf("%u(%u-%u): #[%u] s[%.2f] d[%.2f] s_dot[%.2f] s_dot2[%.2f] s_dot3[%.2f] d_dot[%.2f] d_dot2[%.2f] avg_d_dot[%.2f] ",
+  printf("%u(%u-%u): #[%u] s[%.2f] d[%.2f] s_dot[%.2f] s_dot2[%.2f] "
+      "s_dot3[%.2f] d_dot[%.2f] d_dot2[%.2f] avg_d_dot[%.2f] ",
       option.state,
       current_lane_,
       option.lane,
@@ -387,49 +269,61 @@ void PathPlanner::CalculateCost2(Trajectory& option,
       option.d_velocity,
       option.d_acceleration,
       option.avg_d_acceleration);
+
   // The cost of plotting too much into the future
   double expected_points = Helpers::UnsignedToSigned(kPathPoints) * 1.0;
   option.cost += Helpers::Logistic(
       (Helpers::UnsignedToSigned(option.total_size) - expected_points) /
       expected_points) * 3.0;
+
   // Cost of not moving
   option.cost += (option.s_velocity <= 0.0 ? 1.0 : 0.0) * 100.0;
+
   // Cost of going in reverse
   option.cost += (option.s_velocity < 0.0 ? 1.0 : 0.0) * 50.0;
+
   // Cost of going too slow
-  //option.cost += Helpers::Logistic((max_velocity - option.s_velocity) / option.s_velocity) * 7.0;
-  option.cost += (max((max_velocity - option.s_velocity) / (option.s_velocity + 1.0), 0.0) / max_velocity) * 250.0;
+  option.cost += (max((max_velocity - option.s_velocity) /
+      (option.s_velocity + 1.0), 0.0) / max_velocity) * 250.0;
+
   // Cost of breaking
   option.cost += (option.s_acceleration + abs(option.d_acceleration) < 0.0 ?
-      Helpers::Logistic(sqrt(pow(option.s_acceleration, 2) + pow(option.d_acceleration, 2)) / max_acceleration_) : 0.0) * 0.0;
+      Helpers::Logistic(sqrt(pow(option.s_acceleration, 2) +
+      pow(option.d_acceleration, 2)) / max_acceleration_) : 0.0) * 0.0;
+
   // Cost of going over the speed limit
   option.cost += (option.s_velocity > max_velocity ? 1.0 : 0.0) * 30.0;
+
   // Cost of going over the acceleration limit
   option.cost += (option.s_acceleration > max_acceleration_ ? 1.0 : 0.0) * 40.0;
+
   // Cost of high acceleration
-  //option.cost += Helpers::Logistic(abs(option.s_acceleration + option.d_acceleration) / max_acceleration_) * 1.0;
   option.cost += (abs(option.s_acceleration) / max_acceleration_) * 0.0;
+
   // The cost of high jerk
   option.cost += Helpers::Logistic(option.s_jerk / max_jerk_) * 0.0;
+
   // The cost of going over the maximum jerk
   option.cost += (option.s_jerk > max_jerk_ ? 1.0 : 0.0) * 1.0;
+
+  // The cost of ending up too far from the middle of the lane
+  option.cost += Helpers::Logistic(abs(option.d -
+      (target_lane_start + target_lane_end) / 2.0) / (kLaneWidth / 2.0)) * 0.0;
+
   // The cost of not reaching the target lane
-  option.cost += Helpers::Logistic(abs(option.d - (target_lane_start + target_lane_end) / 2.0) / (kLaneWidth / 2.0)) * 0.0;
-  option.cost += (option.d < target_lane_start || option.d > target_lane_end ? 1 : 0) * 23.0;
+  option.cost += (option.d < target_lane_start || option.d > target_lane_end ?
+      1 : 0) * 23.0;
+
   // Cost of changing lanes too fast
-  option.cost += Helpers::Logistic(option.d_acceleration / max_acceleration_) * 0.0;
+  option.cost +=
+      Helpers::Logistic(option.d_acceleration / max_acceleration_) * 0.0;
+
   // Cost of going out of bounds
   option.cost += ((option.lane < 1 || option.lane > 3) ? 1.0 : 0.0) * 80;
 
   printf("C1[%.4f] ", option.cost);
+
   int target_lane = option.lane;
-  /*
-  double a = current_d - option.d;
-  double b = option.s - current_s;
-  double intercept = current_d - (-a / b) * current_s;
-  double c = intercept * -b;
-  double normal = sqrt(a * a + b * b);
-  */
   double distance_to_closest_leading_car = 1E9;
   double distance_to_current_leading_car = 1E9;
   double distance_to_current_following_car = -1E9;
@@ -441,6 +335,7 @@ void PathPlanner::CalculateCost2(Trajectory& option,
   double future_following_car_s_velocity = 100.0;
   unsigned int* leading_current = nullptr;
   unsigned int* following_future = nullptr;
+
   for (size_t i = 0; i < sensor_fusion.size(); ++i) {
     /*
       Map of adversary cars in sensor fusion array
@@ -460,41 +355,43 @@ void PathPlanner::CalculateCost2(Trajectory& option,
     double adversary_d = sensor_fusion[i][6];
     double adversary_velocity = sensor_fusion[i][7];
     int adversary_lane = sensor_fusion[i][8];
+
     // Consider only cars which are in front of us or "right" behind us.
-    //if (adversary_s >= current_s /*(current_s - (kSafetyDistance / 2))*/) {
     if (adversary_lane == target_lane) {
-      // If we are not changing lanes
       // TODO: Account for cars that are moving into our lane!
       // TODO: Beware, the s value wraps around
-        double s_distance_from_current = adversary_s - current_s; // option.s;
-          // It is the closest car in front of where we are
-        if (adversary_s > current_s &&
-            s_distance_from_current < distance_to_current_leading_car) {
-          distance_to_current_leading_car = s_distance_from_current;
-          current_leading_car_s_velocity = adversary_velocity;
-          leading_current = &adversary;  // XXX: This should be safe, right?
-        }
-        if (adversary_s <= current_s &&
-            s_distance_from_current > distance_to_current_following_car) {
-          distance_to_current_following_car = s_distance_from_current;
-          current_following_car_s_velocity = adversary_velocity;
-        }
-        // For cars that are on the lane we intend to be
-        // TODO: Should project the aversary's position in time, at least for
-        //       those options which require more points!
-        double s_distance_from_target = adversary_s - option.s;
-          // It is the closest car in front of where we will be
-        if (adversary_s > option.s &&
-            s_distance_from_target < distance_to_future_leading_car) {
-          distance_to_future_leading_car = s_distance_from_target;
-          future_leading_car_s_velocity = adversary_velocity;
-        }
-        if (adversary_s <= option.s &&
-            s_distance_from_target > distance_to_future_following_car) {
-          distance_to_future_following_car = s_distance_from_target;
-          future_following_car_s_velocity = adversary_velocity;
-          following_future = &adversary;
-        }
+      double s_distance_from_current = adversary_s - current_s;
+
+      // It is the closest car in front of where we are
+      if (adversary_s > current_s &&
+          s_distance_from_current < distance_to_current_leading_car) {
+        distance_to_current_leading_car = s_distance_from_current;
+        current_leading_car_s_velocity = adversary_velocity;
+        leading_current = &adversary;  // XXX: This should be safe, right?
+      }
+
+      if (adversary_s <= current_s &&
+          s_distance_from_current > distance_to_current_following_car) {
+        distance_to_current_following_car = s_distance_from_current;
+        current_following_car_s_velocity = adversary_velocity;
+      }
+
+      // TODO: Should project the aversary's position in time, at least for
+      //       those options which require more points!
+      double s_distance_from_target = adversary_s - option.s;
+      // It is the closest car in front of where we will be
+      if (adversary_s > option.s &&
+          s_distance_from_target < distance_to_future_leading_car) {
+        distance_to_future_leading_car = s_distance_from_target;
+        future_leading_car_s_velocity = adversary_velocity;
+      }
+
+      if (adversary_s <= option.s &&
+          s_distance_from_target > distance_to_future_following_car) {
+        distance_to_future_following_car = s_distance_from_target;
+        future_following_car_s_velocity = adversary_velocity;
+        following_future = &adversary;
+      }
     } else if (adversary_lane == current_lane_) {
       double s_distance_from_current = adversary_s - current_s; // option.s;
       if (adversary_s > current_s &&
@@ -502,88 +399,69 @@ void PathPlanner::CalculateCost2(Trajectory& option,
         distance_to_closest_leading_car = s_distance_from_current;
       }
     }
-      /*
-      double normal_distance = abs(a * adversary_s + b * adversary_d + c) / normal;
-      // When changing lanes, consider the cars in current and target lanes
-      if ((adversary_lane == current_lane_ || adversary_lane == target_lane) &&
-          // It is the closest car
-          normal_distance < distance_to_closest_car) {
-        distance_to_closest_car = normal_distance;
-      }
-      */
-    //}
   }
-  // Factor in how long before we hit the leading car at the current speed
-  /*
-  if (option.s_velocity - current_leading_car_s_velocity > 0.0 &&
-      distance_to_current_leading_car < kSafetyDistance) {
-    option.cost += Helpers::Logistic(
-        (option.s_velocity - current_leading_car_s_velocity) /
-        max(distance_to_current_leading_car, 1E-9)) * 0.0;
-  }
-  if (option.s_velocity - future_leading_car_s_velocity > 0.0 &&
-      distance_to_future_leading_car < kSafetyDistance) {
-    option.cost += Helpers::Logistic(
-        (option.s_velocity - future_leading_car_s_velocity) /
-        max(distance_to_future_leading_car, 1E-9)) * 12.0;
-  }
-  */
   // Distance buffer
-  option.cost += (max((kSafetyDistance - distance_to_future_leading_car) / (distance_to_future_leading_car + 1), 0.0) / kSafetyDistance) * 100.0;
+  option.cost += (max((kSafetyDistance - distance_to_future_leading_car) /
+      (distance_to_future_leading_car + 1), 0.0) / kSafetyDistance) * 100.0;
+
   // Unnecessary lane change
-  option.cost += (option.lane != current_lane_ && distance_to_closest_leading_car > kSafetyDistance ? 1 : 0) * 120.0;
+  option.cost += (option.lane != current_lane_ &&
+      distance_to_closest_leading_car > kSafetyDistance ? 1 : 0) * 120.0;
 
   double collision_time_buffer = 10.0;
   double multiplier = current_lane_ != target_lane ? 1.0 : 1.0;
-  // Buffer leading car
   // TODO: Promote to function
+  // Buffer leading car
   {
     double velocity_delta = option.s_velocity - current_leading_car_s_velocity;
     double time_to_collision = distance_to_current_leading_car / velocity_delta;
-    //option.cost += max(1 - (time_to_collision > 0.0 ? abs(max(time_to_collision, 0.0) / (kSafetyDistance / velocity_delta)) : 1.0), 0.0) * 6.0;
-    option.cost += max(1.0 - ((time_to_collision > 0.0 ? time_to_collision : collision_time_buffer) / collision_time_buffer), 0.0) * multiplier * 0.0;
+    option.cost += max(1.0 - ((time_to_collision > 0.0 ? time_to_collision :
+        collision_time_buffer) / collision_time_buffer), 0.0) * multiplier * 0.0;
   }
+
   // Buffer following car
   {
     double velocity_delta = option.s_velocity - current_following_car_s_velocity;
     double time_to_collision = distance_to_current_following_car / velocity_delta;
-    //option.cost += max(1 - (time_to_collision > 0.0 ? abs(max(time_to_collision, 0.0) / (kSafetyDistance / velocity_delta)) : 1.0), 0.0) * 5.0;
-    option.cost += max(1.0 - ((time_to_collision > 0.0 ? time_to_collision : collision_time_buffer) / collision_time_buffer), 0.0) * multiplier * 10.0;
+    option.cost += max(1.0 - ((time_to_collision > 0.0 ? time_to_collision :
+        collision_time_buffer) / collision_time_buffer), 0.0) * multiplier * 10.0;
   }
+
   // Buffer target leading car
   {
     double velocity_delta = option.s_velocity - future_leading_car_s_velocity;
     double time_to_collision = distance_to_future_leading_car / velocity_delta;
-    //option.cost += max(1 - (time_to_collision > 0.0 ? abs(max(time_to_collision, 0.0) / (kSafetyDistance / velocity_delta)) : 1.0), 0.0) * 9.0;
-    option.cost += max(1.0 - ((time_to_collision > 0.0 ? time_to_collision : collision_time_buffer) / collision_time_buffer), 0.0) * multiplier * 70.0;
+    option.cost += max(1.0 - ((time_to_collision > 0.0 ? time_to_collision :
+        collision_time_buffer) / collision_time_buffer), 0.0) * multiplier * 70.0;
   }
+
   // Buffer target following car
   {
     double velocity_delta = option.s_velocity - future_following_car_s_velocity;
     double time_to_collision = distance_to_future_following_car / velocity_delta;
-    //option.cost += max(1 - (time_to_collision > 0.0 ? abs(max(time_to_collision, 0.0) / (kSafetyDistance / velocity_delta)) : 1.0), 0.0) * 8.0;
-    option.cost += max(1.0 - ((time_to_collision > 0.0 ? time_to_collision : collision_time_buffer) / collision_time_buffer), 0.0) * multiplier * 0.0;
+    option.cost += max(1.0 - ((time_to_collision > 0.0 ? time_to_collision :
+        collision_time_buffer) / collision_time_buffer), 0.0) * multiplier * 0.0;
   }
+
   // Collision
   double car_radius = 5.0;  // TODO: Either make constant or a parameter
   if (abs(distance_to_current_leading_car) < car_radius ||
       abs(distance_to_future_leading_car) < car_radius) {
     option.cost += 30.0;
   }
+
   // Rear collision
   if (abs(distance_to_current_following_car) < car_radius ||
       abs(distance_to_future_following_car) < car_radius) {
     option.cost += 60.0;
   }
+
   // Side collision
-  if (leading_current && following_future && *leading_current == *following_future) {
+  if (leading_current && following_future &&
+      *leading_current == *following_future) {
     option.cost += 2.0;
   }
-  /*
-  if (current_lane_ != target_lane && distance_to_closest_car < kSafetyDistance) {
-    option.cost += max(Helpers::Logistic((kSafetyDistance - distance_to_closest_car) / max(distance_to_closest_car, 0.0)), 0.0) * 0.0;
-  }
-  */
+
   printf("C2[%.4f]", option.cost);
   printf("\n");
 }

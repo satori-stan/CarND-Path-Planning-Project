@@ -3,7 +3,7 @@ Self-Driving Car Engineer Nanodegree Program
 
 ## Simulator.
 
-You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
+You can download the Term3 Simulator which contains the Path Planning Project from the [releases tab] (https://github.com/udacity/self-driving-car-sim/releases/tag/T3_v1.2).
 
 ## Goals
 
@@ -40,9 +40,7 @@ For each possible state, the trajectory generator will propose at least a couple
 
 The cost function to push the car to drive as close as possible to the speed limit, penalizes lower speeds. The function is different than those used in the lessons: the logistic function meant to keep the cost base between 0 and 1 was great for values that were far from one another but as the ratio between the current speed and the maximum speed approached the limits, the difference was less discernible. The function used is:
 
-    ```
     max((target_speed - current_speed) / (current_speed + 1), 0) / target_speed
-    ```
 
 A differential between the target speed and the current speed is divided by the current speed. This arrangement is because the cost is inversely proportional to the current speed. Adding 1 to the current speed in the divisor prevents a division by zero and while it reduces the usable range of values, it still provides good resolution.
 
@@ -60,14 +58,14 @@ There are a lot of variables to consider to avoid hitting other cars. For each o
 
 The considerations are:
 * The distance between the car and the adversary in front given the final position should be as much as possible greater than a safety distance (30m).
-* The time to hit a car that is in front of us given the current and target positions in the target lane should always be over 10 seconds, regardless of the distance. This is calculated with the difference between the car's and aversaries' velocities and the distance between one another.
+* The time to hit a car that is in front of us given the current and target positions in the target lane should always be over 10 seconds, regardless of the distance. This is calculated with the difference between the car's and adversaries' velocities and the distance between one another.
 * The time for a car to hit us from behind given the current and target positions in the target lane should always be over 10 seconds, regardless of the distance.
 * An adversary should never be within the vehicle radius in front of behind our position (current or target).
 * The same adversary shouldn't be in front of us in our current position or behind us in the target position in the target lane.
 
 Trying to change lane and coming up short of the target lane is also penalized.
 
-Cost gains are as varied as 100 and 2, given the number of scenarios analized. To balance the competing concerns, key variables of each proposed trajectory are logged, as are the vehicle positions and are stored to make sure that gain modifications to get a specific outcome don't adversely affect the results expected in other scenarios.
+Cost gains are as varied as 100 and 2, given the number of scenarios analyzed. To balance the competing concerns, key variables of each proposed trajectory are logged, as are the vehicle positions and are stored to make sure that gain modifications to get a specific outcome don't adversely affect the results expected in other scenarios.
 
 The scenarios, formulas and gains are documented in the included [Excel file](./Cases.xlsm).
 
@@ -114,8 +112,7 @@ The highway's waypoints loop around so the frenet s value, distance along the ro
 
 #### Previous path data given to the Planner
 
-//Note: Return the previous list but with processed points removed, can be a nice tool to show how far along
-the path has processed since last time. 
+//Note: Return the previous list but with processed points removed, can be a nice tool to show how far along the path has processed since last time. 
 
 ["previous_path_x"] The previous list of x points previously given to the simulator
 
@@ -133,9 +130,9 @@ the path has processed since last time.
 
 ## Details
 
-1. The car uses a perfect controller and will visit every (x,y) point it recieves in the list every .02 seconds. The units for the (x,y) points are in meters and the spacing of the points determines the speed of the car. The vector going from a point to the next point in the list dictates the angle of the car. Acceleration both in the tangential and normal directions is measured along with the jerk, the rate of change of total Acceleration. The (x,y) point paths that the planner recieves should not have a total acceleration that goes over 10 m/s^2, also the jerk should not go over 50 m/s^3. (NOTE: As this is BETA, these requirements might change. Also currently jerk is over a .02 second interval, it would probably be better to average total acceleration over 1 second and measure jerk from that.
+1. The car uses a perfect controller and will visit every (x,y) point it receives in the list every .02 seconds. The units for the (x,y) points are in meters and the spacing of the points determines the speed of the car. The vector going from a point to the next point in the list dictates the angle of the car. Acceleration both in the tangential and normal directions is measured along with the jerk, the rate of change of total Acceleration. The (x,y) point paths that the planner receives should not have a total acceleration that goes over 10 m/s^2, also the jerk should not go over 50 m/s^3. (NOTE: As this is BETA, these requirements might change. Also currently jerk is over a .02 second interval, it would probably be better to average total acceleration over 1 second and measure jerk from that.
 
-2. There will be some latency between the simulator running and the path planner returning a path, with optimized code usually its not very long maybe just 1-3 time steps. During this delay the simulator will continue using points that it was last given, because of this its a good idea to store the last points you have used so you can have a smooth transition. previous_path_x, and previous_path_y can be helpful for this transition since they show the last points given to the simulator controller with the processed points already removed. You would either return a path that extends this previous path or make sure to create a new path that has a smooth transition with this last path.
+2. There will be some latency between the simulator running and the path planner returning a path, with optimized code usually it�s not very long maybe just 1-3 time steps. During this delay the simulator will continue using points that it was last given, because of this it�s a good idea to store the last points you have used so you can have a smooth transition. previous_path_x, and previous_path_y can be helpful for this transition since they show the last points given to the simulator controller with the processed points already removed. You would either return a path that extends this previous path or make sure to create a new path that has a smooth transition with this last path.
 
 ## Dependencies
 
@@ -157,3 +154,4 @@ the path has processed since last time.
     cd uWebSockets
     git checkout e94b6e1
     ```
+

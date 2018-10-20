@@ -150,18 +150,20 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
     {max_velocity_, current_acceleration_ + 1.0, current_jerk_ + 0.5, 0.0},
     {max_velocity_, current_acceleration_ + 0.6, current_jerk_ + 0.5, 0.0},
     {max_velocity_, current_acceleration_ + 0.3, current_jerk_ + 0.5, 0.0},
-    {max_velocity_, current_acceleration_ - 1.0, current_jerk_ + 0.5, 0.0},
     // Third set is following speed (allow for hard breaking)
+    {max_velocity_, current_acceleration_ - 1.0, current_jerk_ + 0.5, 0.0},
     {current_velocity_ - 5.0, current_acceleration_ - 2.0, -1.0, 0.0}};
 
   // We calculate the acceleration and jerk based on a one second interval to
   // simplify the math.
-  double time_delta = (kPathPoints - previous_path_size_) * kControllerExecutionTime;
+  double time_delta = (kPathPoints - previous_path_size_) *
+      kControllerExecutionTime;
 
   if (previous_path_size_ < kPathPoints) {
     // TODO: Sample paths with target velocities between the max and the current,
     //       assign costs and pick the one with the lowest cost.
     for (auto option = options.begin(); option != options.end(); ++option) {
+
       // Starting cost value
       out.emplace_back();
       Trajectory& trajectory = out.back();
@@ -171,6 +173,7 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
 
       vector<double> x(x_);
       vector<double> y(y_);
+
       // Choose (two?) points ahead to draw a line. Thinking of a similar distance
       // increment, distance_increment * 30 and distance_increment * 60.
       vector<double> cartesian;
@@ -197,6 +200,8 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
       trajectory.d_acceleration = current_normal_acceleration_ / 1.6180339;
       double acceleration = option->acceleration - abs(trajectory.d_acceleration);
       size_t i = 1;
+
+      // Finally, plot the points following the spline
       for (; i < (kPathPoints - previous_path_size_); ++i) {
         double elapsed = i * kControllerExecutionTime;
         velocity = (current_velocity_ + (acceleration * elapsed));
@@ -208,14 +213,13 @@ void PolynomialTrajectoryGenerator::FollowLaneAndLeadingCar(
         trajectory.x.push_back(calculated[0]);
         trajectory.y.push_back(calculated[1]);
       }
+
       trajectory.total_size = previous_path_size_ + i;
       trajectory.s = delta + car_s;
       trajectory.d = current_d - trajectory.d;
       trajectory.s_velocity = velocity;
       trajectory.s_acceleration = acceleration * 2.0;  // XXX: This is a hack, my acceleration calculations are off!
       trajectory.s_jerk = abs(trajectory.s_acceleration - current_acceleration_);  // Approximation since we use points for one second
-      //trajectory.d_acceleration = 0.0;
-      //trajectory.avg_d_acceleration = 0.0;
     }
   } else printf("%u\n", previous_path_size_);
 }
@@ -237,6 +241,7 @@ void PolynomialTrajectoryGenerator::AssignBase(
   double prev_reference_y;
 
   if (previous_path_size_ < 2) {
+    // If we don't have enough information, we make it up
     reference_x_ = current_x;
     reference_y_ = current_y;
     reference_angle_ = current_theta;
@@ -251,6 +256,7 @@ void PolynomialTrajectoryGenerator::AssignBase(
     y_.push_back(reference_y_);
 
   } else {
+    // Otherwise we use as much as we can
     prev_reference_x = previous_x[previous_path_size_ - 2];
     prev_reference_y = previous_y[previous_path_size_ - 2];
     x_.push_back(prev_reference_x);
@@ -271,7 +277,7 @@ void PolynomialTrajectoryGenerator::AssignBase(
                         kControllerExecutionTime;
 
     */
-    //double previous_velocity = current_velocity_;
+    // And we calculate the real acceleration
     if (previous_path_size_ > 2) {
       vector<double> velocities;
       size_t samples_for_a_second = static_cast<size_t>(1/kControllerExecutionTime) + 1;
@@ -317,9 +323,13 @@ void PolynomialTrajectoryGenerator::ChangeLane(
     {30, current_acceleration_ + 0.6},
     {40, current_acceleration_ + 0.6}};
 
-  for (auto variation = variations.begin(); variation != variations.end(); ++variation) {
+  for (auto variation = variations.begin();
+      variation != variations.end();
+      ++variation) {
+
     vector<double> x(x_);
     vector<double> y(y_);
+
     // Choose (two?) points ahead to draw a line.
     std::vector<double> cartesian;
     cartesian = Helpers::getXY(car_s + variation->first, target_d, maps_s_, maps_x_, maps_y_);
@@ -342,37 +352,53 @@ void PolynomialTrajectoryGenerator::ChangeLane(
     out.emplace_back();
     Trajectory& trajectory = out.back();
 
+    // Try to calculate the combination of s and d accelerations and speeds, to
+    // plot them correctly.
     double d_velocity_0 = 0.0;
+    // The distance we want to cover in d, by the time taken to get there
     double lane_change_approximate_velocity =
-        abs((target_d - current_d) / (variation->first / current_velocity_));  // 1.6180339;
+        abs((target_d - current_d) / (variation->first / current_velocity_));
+    // The distance we want to use to make the change by the velocity
     double change_timespan = variation->first / current_velocity_;
-    double s_velocity = pow(current_velocity_, 2) - pow(lane_change_approximate_velocity, 2);
-    trajectory.d_acceleration = (lane_change_approximate_velocity - d_velocity_0) / change_timespan;
-    trajectory.s_acceleration = pow(variation->second, 2) - pow(abs(trajectory.d_acceleration), 2);
+    // Our velocity will be in the direction of travel, so the real S velocity
+    // is the adjacent, if thought of as a right triangle.
+    double s_velocity = pow(current_velocity_, 2) -
+        pow(lane_change_approximate_velocity, 2);
+
+    // And then we apply our calculations
+    trajectory.d_acceleration =
+        (lane_change_approximate_velocity - d_velocity_0) / change_timespan;
+    trajectory.s_acceleration =
+        pow(variation->second, 2) - pow(abs(trajectory.d_acceleration), 2);
+
     double s = 0.0;
     double last_s = s;
     double last_d = 0.0;
     size_t i = 0;
-    while (abs(current_d - target_d - trajectory.d) > (/*lane_width*/ 1.0) &&
+
+    // Now plot the points. For lane changing we need to go over a total of 50;
+    // at least the way that the program works now. We don't want to calculate
+    // forever, so we put some limits: reach within 1 meter of the center of the
+    // target lane, or plot twice the regular number of points.
+    while (abs(current_d - target_d - trajectory.d) > (/* lane_width / 4 */ 1.0) &&
         i < kPathPoints * 2) {
+
       double elapsed = ++i * kControllerExecutionTime;
-      /*
-      double d_velocity_1 = lane_change_approximate_velocity * exp(
-        -pow(elapsed - (change_timespan / 2), 2) / (2 * pow(change_timespan / 6, 2))
-      );
-      */
-      //d_velocity_0 = d_velocity_1;
-      //trajectory.max_d_acceleration = max(abs(trajectory.d_acceleration), trajectory.max_d_acceleration);
+      // Calculate the velocity for the step
       s_velocity = (current_velocity_ + (trajectory.s_acceleration * elapsed));
+      // And the new S position
       s = s_velocity * elapsed;
-      //printf("delta %f, tangential %f, normal %f\n", abs(current_d - target_d - d_delta), s_velocity, d_velocity_1);
+      // And the corresponding D position
       trajectory.d = spline(s);
+      // Backpropagate the step's information into the state's information
       trajectory.d_velocity = (trajectory.d - last_d) / kControllerExecutionTime;
-      trajectory.avg_d_acceleration = (trajectory.avg_d_acceleration * (i - 1) + (trajectory.d_velocity - d_velocity_0)) / i;
+      trajectory.avg_d_acceleration = (trajectory.avg_d_acceleration * (i - 1) +
+          (trajectory.d_velocity - d_velocity_0)) / i;
       d_velocity_0 = trajectory.d_velocity;
       last_d = trajectory.d;
       trajectory.s_velocity = (s - last_s) / kControllerExecutionTime;
       last_s = s;
+      // Store in the results
       vector<double> calculated = CartesianUnshift(s, trajectory.d);
       trajectory.x.push_back(calculated[0]);
       trajectory.y.push_back(calculated[1]);
@@ -380,8 +406,8 @@ void PolynomialTrajectoryGenerator::ChangeLane(
     trajectory.total_size = previous_path_size_ + i;
     trajectory.s = car_s + s;
     trajectory.d = current_d - trajectory.d;
-    //trajectory.s_velocity = s_velocity;
-    trajectory.s_jerk = abs(trajectory.s_acceleration - current_acceleration_);  // Approximation since we use points for one second
+    // Approximation since we use points for one second
+    trajectory.s_jerk = abs(trajectory.s_acceleration - current_acceleration_);
     //printf("--\n");
   }
 }
@@ -421,12 +447,5 @@ std::vector<double> PolynomialTrajectoryGenerator::CartesianUnshift(double x,
   double rotated_y = x * sin(reference_angle_)
       + y * cos(reference_angle_);
 
-  /*
-  std::vector<double> coordinates;
-  coordinates.push_back(rotated_x + reference_x_);
-
-  coordinates.push_back(rotated_y + reference_y_);
-  return coordinates;
-  */
   return {rotated_x + reference_x_, rotated_y + reference_y_};
 }
