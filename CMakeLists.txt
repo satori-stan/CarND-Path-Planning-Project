@@ -4,8 +4,8 @@ cmake_minimum_required (VERSION 3.5)
 
 add_definitions(-std=c++11)
 
-# Comment the next line to use a version of uWebSockets previous to 0.14.X
-add_definitions(-DUWS_0_14_X)
+# Uncomment the next line to use version 0.14 of uWebSockets 
+#add_definitions(-DUWS_0_14_X)
 
 set(CMAKE_CXX_STANDARD 11)
 set(CXX_FLAGS "-Wall")
