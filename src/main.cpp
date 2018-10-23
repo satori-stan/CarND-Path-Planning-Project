@@ -165,9 +165,9 @@ int main() {
     std::cout << "Disconnected" << std::endl;
   });
 
+  int port = 4567;
 #ifdef UWS_0_14_X
   auto host = "127.0.0.1";
-  int port = 4567;
   if (h.listen(host, port)) {
 #else  // !UWS_0_14_X
   if (h.listen(port)) {
